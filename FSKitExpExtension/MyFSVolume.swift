@@ -12,6 +12,7 @@ import os
 final class MyFSVolume: FSVolume {
     
     private let resource: FSResource
+    var mount: FSTaskOptions? = nil
     
     private let logger = Logger(subsystem: "FSKitExp", category: "MyFSVolume")
     
@@ -36,6 +37,13 @@ final class MyFSVolume: FSVolume {
             volumeID: FSVolume.Identifier(uuid: Constants.volumeIdentifier),
             volumeName: FSFileName(string: "Test1")
         )
+        
+//        let item = MyFSItem(name: FSFileName(string: "asd"))
+//        
+//        item.attributes.parentID = root.attributes.fileID
+//        item.attributes.type = .file
+//        root.addItem(item)
+        
     }
 }
 
@@ -100,6 +108,7 @@ extension MyFSVolume: FSVolume.Operations {
     
     
     func activate(options: FSTaskOptions) async throws -> FSItem {
+        // self.mount = options
         logger.debug("activate")
         return root
     }
@@ -109,6 +118,7 @@ extension MyFSVolume: FSVolume.Operations {
     }
     
     func mount(options: FSTaskOptions) async throws {
+        // self.mount = options
         logger.debug("mount")
     }
     
@@ -180,6 +190,35 @@ extension MyFSVolume: FSVolume.Operations {
         inDirectory directory: FSItem,
         attributes newAttributes: FSItem.SetAttributesRequest
     ) async throws -> (FSItem, FSFileName) {
+        // Function to read file into string
+        func readFileIntoString(path: String) throws -> String {
+            // let inspirationsDirectory = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)
+            
+            // let url = inspirationsDirectory[0].appendingPathComponent("prepared.json")
+            let url = URL(fileURLWithPath: path)
+            // let isAccessing = url.startAccessingSecurityScopedResource()
+            do {
+                try Data(contentsOf: url)
+            } catch {
+                logger.error("Error reading file: \(error.localizedDescription)")
+            }
+ 
+            guard let data = try? Data(contentsOf: url) else {
+                throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+            }
+            
+            guard let string = String(data: data, encoding: .utf8) else {
+                throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+            }
+            // if isAccessing {
+            //     url.stopAccessingSecurityScopedResource()
+            // }
+
+            
+            return string
+        }
+
+       let res = try? readFileIntoString(path: "/Users/vadymh/Library/Containers/app.badim.FSKitExpExtension/Data/asd.txt")
         logger.debug("createItem: \(String(describing: name.string)) - \(newAttributes.mode)")
         
         guard let directory = directory as? MyFSItem else {

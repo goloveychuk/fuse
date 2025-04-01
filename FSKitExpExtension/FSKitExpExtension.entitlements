@@ -2,9 +2,16 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>com.apple.security.app-sandbox</key>
-    <true/>
-    <key>com.apple.developer.fskit.fsmodule</key>
-    <true/>
+	<key>com.apple.developer.fskit.fsmodule</key>
+	<true/>
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.files.downloads.read-only</key>
+	<true/>
+    <key>com.apple.security.temporary-exception.files.absolute-path.read-write</key>
+    <array>
+        <!-- Replace the string below with the full path to the directory you want to access -->
+        <string>/Users/vadymh</string>
+    </array>
 </dict>
 </plist>
