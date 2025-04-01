@@ -19,7 +19,7 @@ final class ViewModel {
     init() {
         client = FSClient.shared
         client?.fetchInstalledExtensions { modules, errors in
-            if let modules {
+            if let modules: [FSModuleIdentity] {
                 self.modules = modules
             }
         }

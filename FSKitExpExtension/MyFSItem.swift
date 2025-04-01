@@ -8,13 +8,29 @@
 import Foundation
 import FSKit
 
+final class AtomicInt {
+    private var value: Int64
+    
+    init(_ initialValue: Int64) {
+        value = initialValue
+    }
+    
+    func increment() -> Int64 {
+        return OSAtomicIncrement64(&value)
+    }
+    
+    // func getValue() -> Int64 {
+    //     return OSAtomicAdd64(0, &value)
+    // }
+}
+
 final class MyFSItem: FSItem {
     
-    private static var id: UInt64 = FSItem.Identifier.rootDirectory.rawValue + 1
+    // private static var id = AtomicInt(Int64(FSItem.Identifier.rootDirectory.rawValue + 1))
     static func getNextID() -> UInt64 {
-        let current = id
-        id += 1
-        return current
+        
+        // let newID = id.increment()
+        return UInt64.random(in: 1...UInt64.max)
     }
     
     let name: FSFileName
