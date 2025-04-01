@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 enum ZipSignature {
     static let CENTRAL_DIRECTORY: UInt32 = 0x02014b50
@@ -82,8 +83,12 @@ class ZipReader {
         defer {
             try? fileHandle.close()
         }
-        
-        let fileSize = try fileHandle.seekToEnd() // todo stat
+        // Get file size using stat on the file descriptor
+        var statInfo = stat()
+        if fstat(fileHandle.fileDescriptor, &statInfo) != 0 {
+            throw ZipError.invalidZipFile("Could not determine file size")
+        }
+        let fileSize = UInt64(statInfo.st_size)
         
         if fileSize < UInt64(noCommentCDSize) {
             throw ZipError.invalidZipFile("EOCD not found")
