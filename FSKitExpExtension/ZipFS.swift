@@ -20,6 +20,12 @@ enum ZipError: Error {
     case zipArchiveInconsistent
 }
 
+extension Data {
+    func loadLittleEndian<T: FixedWidthInteger>(_ offset: Int, as type: T.Type) -> T {
+        return withUnsafeBytes { $0.load(fromByteOffset: offset, as: type).littleEndian }
+    }
+}
+
 struct ZipEntry {
     let name: String
     let compressionMethod: UInt16
@@ -77,7 +83,7 @@ class ZipReader {
         var eocdBuffer = try  fileHandle.read(upToCount: noCommentCDSize) ?? Data()
         
         if eocdBuffer.count == noCommentCDSize {
-            let signature = eocdBuffer.withUnsafeBytes { $0.load(fromByteOffset: 0, as: UInt32.self).littleEndian }
+            let signature = eocdBuffer.loadLittleEndian(0, as: UInt32.self)
             if signature == ZipSignature.END_OF_CENTRAL_DIRECTORY {
                 eocdOffset = 0
             }
@@ -91,7 +97,7 @@ class ZipReader {
             
             // Find EOCD signature
             for i in stride(from: eocdBuffer.count - 4, through: 0, by: -1) {
-                let signature = eocdBuffer.withUnsafeBytes { $0.load(fromByteOffset: i, as: UInt32.self).littleEndian }
+                let signature = eocdBuffer.loadLittleEndian(i, as: UInt32.self)
                 if signature == ZipSignature.END_OF_CENTRAL_DIRECTORY {
                     eocdOffset = i
                     break
@@ -104,10 +110,10 @@ class ZipReader {
         }
         
         // Parse EOCD fields
-        let totalEntries = eocdBuffer.withUnsafeBytes { $0.load(fromByteOffset: eocdOffset + 10, as: UInt16.self).littleEndian }
-        let centralDirSize = eocdBuffer.withUnsafeBytes { $0.load(fromByteOffset: eocdOffset + 12, as: UInt32.self).littleEndian }
-        let centralDirOffset = eocdBuffer.withUnsafeBytes { $0.load(fromByteOffset: eocdOffset + 16, as: UInt32.self).littleEndian }
-        let commentLength = eocdBuffer.withUnsafeBytes { $0.load(fromByteOffset: eocdOffset + 20, as: UInt16.self).littleEndian }
+        let totalEntries = eocdBuffer.loadLittleEndian(eocdOffset + 10, as: UInt16.self)
+        let centralDirSize = eocdBuffer.loadLittleEndian(eocdOffset + 12, as: UInt32.self)
+        let centralDirOffset = eocdBuffer.loadLittleEndian(eocdOffset + 16, as: UInt32.self)
+        let commentLength = eocdBuffer.loadLittleEndian(eocdOffset + 20, as: UInt16.self)
         
         // Consistency checks
         if eocdOffset + Int(commentLength) + noCommentCDSize > eocdBuffer.count {
@@ -144,28 +150,28 @@ class ZipReader {
                 throw ZipError.zipArchiveInconsistent
             }
             
-            let signature = cdBuffer.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self).littleEndian }
+            let signature = cdBuffer.loadLittleEndian(offset, as: UInt32.self)
             if signature != ZipSignature.CENTRAL_DIRECTORY {
                 throw ZipError.zipArchiveInconsistent
             }
             
-            let versionMadeBy = cdBuffer.withUnsafeBytes { $0.load(fromByteOffset: offset + 4, as: UInt16.self).littleEndian }
+            let versionMadeBy = cdBuffer.loadLittleEndian(offset + 4, as: UInt16.self)
             let os = UInt8(versionMadeBy >> 8)
             
-            let flags = cdBuffer.withUnsafeBytes { $0.load(fromByteOffset: offset + 8, as: UInt16.self).littleEndian }
+            let flags = cdBuffer.loadLittleEndian(offset + 8, as: UInt16.self)
             if (flags & 0x0001) != 0 {
                 throw ZipError.unsupportedZipFeature("Encrypted zip files are not supported")
             }
             
-            let compressionMethod = cdBuffer.withUnsafeBytes { $0.load(fromByteOffset: offset + 10, as: UInt16.self).littleEndian }
-            let crc = cdBuffer.withUnsafeBytes { $0.load(fromByteOffset: offset + 16, as: UInt32.self).littleEndian }
-            let compressedSize = cdBuffer.withUnsafeBytes { $0.load(fromByteOffset: offset + 20, as: UInt32.self).littleEndian }
-            let size = cdBuffer.withUnsafeBytes { $0.load(fromByteOffset: offset + 24, as: UInt32.self).littleEndian }
-            let nameLength = cdBuffer.withUnsafeBytes { $0.load(fromByteOffset: offset + 28, as: UInt16.self).littleEndian }
-            let extraLength = cdBuffer.withUnsafeBytes { $0.load(fromByteOffset: offset + 30, as: UInt16.self).littleEndian }
-            let commentLength = cdBuffer.withUnsafeBytes { $0.load(fromByteOffset: offset + 32, as: UInt16.self).littleEndian }
-            let externalAttributes = cdBuffer.withUnsafeBytes { $0.load(fromByteOffset: offset + 38, as: UInt32.self).littleEndian }
-            let localHeaderOffset = cdBuffer.withUnsafeBytes { $0.load(fromByteOffset: offset + 42, as: UInt32.self).littleEndian }
+            let compressionMethod = cdBuffer.loadLittleEndian(offset + 10, as: UInt16.self)
+            let crc = cdBuffer.loadLittleEndian(offset + 16, as: UInt32.self)
+            let compressedSize = cdBuffer.loadLittleEndian(offset + 20, as: UInt32.self)
+            let size = cdBuffer.loadLittleEndian(offset + 24, as: UInt32.self)
+            let nameLength = cdBuffer.loadLittleEndian(offset + 28, as: UInt16.self)
+            let extraLength = cdBuffer.loadLittleEndian(offset + 30, as: UInt16.self)
+            let commentLength = cdBuffer.loadLittleEndian(offset + 32, as: UInt16.self)
+            let externalAttributes = cdBuffer.loadLittleEndian(offset + 38, as: UInt32.self)
+            let localHeaderOffset = cdBuffer.loadLittleEndian(offset + 42, as: UInt32.self)
             
             // Extract name
             let nameData = cdBuffer.subdata(in: (offset + 46)..<(offset + 46 + Int(nameLength)))
