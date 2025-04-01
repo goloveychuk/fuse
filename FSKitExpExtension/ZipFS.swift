@@ -22,7 +22,20 @@ enum ZipError: Error {
 
 extension Data {
     func loadLittleEndian<T: FixedWidthInteger>(_ offset: Int, as type: T.Type) -> T {
-        return withUnsafeBytes { $0.load(fromByteOffset: offset, as: type).littleEndian }
+        let size = MemoryLayout<T>.size
+        
+        var value: T = 0
+        withUnsafeBytes { buffer in
+            for i in 0..<size {
+                if offset + i < buffer.count {
+                    let byte = T(buffer[offset + i])
+                    value |= byte << (8 * i)
+                }
+            }
+        }
+        
+        // Convert from little-endian to host byte order
+        return T(littleEndian: value)
     }
 }
 
