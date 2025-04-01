@@ -9,6 +9,7 @@ import Foundation
 import FSKit
 
 @main
+@available(macOS 15.4, *)
 struct FSKitExpExtension : UnaryFileSystemExtension {
     
     var fileSystem : FSUnaryFileSystem & FSUnaryFileSystemOperations {

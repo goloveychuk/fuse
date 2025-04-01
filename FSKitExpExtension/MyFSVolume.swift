@@ -191,7 +191,7 @@ extension MyFSVolume: FSVolume.Operations {
         attributes newAttributes: FSItem.SetAttributesRequest
     ) async throws -> (FSItem, FSFileName) {
         // Function to read file into string
-        func readFileIntoString(path: String) throws -> String {
+        func readFileIntoString(path: String) throws -> Data {
             // let inspirationsDirectory = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)
             
             // let url = inspirationsDirectory[0].appendingPathComponent("prepared.json")
@@ -207,18 +207,20 @@ extension MyFSVolume: FSVolume.Operations {
                 throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
             }
             
-            guard let string = String(data: data, encoding: .utf8) else {
-                throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
-            }
+            // guard let string = String(data: data, encoding: .utf8) else {
+            //     throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+            // }
             // if isAccessing {
             //     url.stopAccessingSecurityScopedResource()
             // }
 
             
-            return string
+            return data
         }
 
        let res = try? readFileIntoString(path: "/Users/vadymh/Library/Containers/app.badim.FSKitExpExtension/Data/asd.txt")
+        let res2 = try? readFileIntoString(path: "/Users/vadymh/Library/Containers/app.badim.FSKitExpExtension/Data/Downloads/topology.json")
+        let res3 = try? readFileIntoString(path: "/Users/vadymh/Library/Containers/app.badim.FSKitExpExtension/Data/@aashutoshrathi-word-wrap-npm-1.2.6-55ddd5ef31-10c0.zip")
         logger.debug("createItem: \(String(describing: name.string)) - \(newAttributes.mode)")
         
         guard let directory = directory as? MyFSItem else {
@@ -240,6 +242,7 @@ extension MyFSVolume: FSVolume.Operations {
         attributes newAttributes: FSItem.SetAttributesRequest,
         linkContents contents: FSFileName
     ) async throws -> (FSItem, FSFileName) {
+        let res4 = try? ZipReader.readZip(fileURL: URL(fileURLWithPath: "/Users/vadymh/Library/Containers/app.badim.FSKitExpExtension/Data/@aashutoshrathi-word-wrap-npm-1.2.6-55ddd5ef31-10c0.zip2"))
         logger.debug("createSymbolicLink: \(name)")
         throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
     }
