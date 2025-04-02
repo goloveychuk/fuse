@@ -234,7 +234,7 @@ class CachedZip {
             case .notLoaded:
                 do {
                     let newZip = try ListableZip(fileURL: URL(fileURLWithPath: zipPath))
-                    state = .loaded(newZip)
+                    // state = .loaded(newZip) //todo!!
                     pthread_rwlock_unlock(&rwlock)
                     return newZip
                 } catch {

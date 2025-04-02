@@ -90,14 +90,14 @@ class ListableZip {
 
         var nameToIdMap: [String: ZipID] = [String: ZipID]()
         func addEntry(parent: String, child: String?) throws -> ZipID {
-            var ind: ZipID
+            var parentId: ZipID
             if let id = nameToIdMap[parent] {
-                ind = id
+                parentId = id
             } else {
                 let newIndex = ZipID.ind(childrenMap.count)
                 nameToIdMap[parent] = newIndex
                 childrenMap.append([:])
-                ind = newIndex
+                parentId = newIndex
             }
             if let child = child {
                 var childId: ZipID
@@ -106,21 +106,31 @@ class ListableZip {
                 } else {
                     childId = try addEntry(parent: parent+"/"+child, child: nil)
                 }
-                guard case .ind(let ind) = ind else {
+                guard case .ind(let parentId) = parentId else {
                     throw ZipError.invalidListing("Cannot set children for file")
                 }
-                childrenMap[ind][child] = childId
+                childrenMap[parentId][child] = childId
             }
-            return ind
+            return parentId
         }
 
         _ = try addEntry(parent: "/", child: nil)
 
         for entry in entries {
-            var (parent, name) = entry.name.splitOnceFromRight(separator: "/")
-            if name == nil || name == "" {
+            var path = entry.name
+            let isDir = path.last == "/"
+            if (isDir) {
+                path = String(path.dropLast())
+            }
+            var (parent, name) = path.splitOnceFromRight(separator: "/")
+            if name == nil {
                 name = parent
                 parent = "/"
+            } else {
+                parent = parent + "/"
+            }
+            if (isDir) {
+                name = name?.appending("/")
             }
             _ = try addEntry(parent: parent, child: name)
 
