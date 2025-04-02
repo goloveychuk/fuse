@@ -143,9 +143,9 @@ extension MyFSVolume: FSVolume.Operations {
         _ desiredAttributes: FSItem.GetAttributesRequest,
         of item: FSItem
     ) async throws -> FSItem.Attributes {
-        if let item = item as? DependencyFSNode {
+        if let item = item as? FSItemProtocol {
             // logger.debug("getItemAttributes1: \(item.name), \(desiredAttributes)")
-            return item.attributes
+            return item.getAttributes()
         } else {
             logger.debug("getItemAttributes2: \(item), \(desiredAttributes)")
             throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
@@ -159,7 +159,7 @@ extension MyFSVolume: FSVolume.Operations {
         throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
 
         // logger.debug("setItemAttributes: \(item), \(newAttributes)")
-        // if let item = item as? DependencyFSNode {
+        // if let item = item as? FSItemProtocol {
         //     mergeAttributes(item.attributes, request: newAttributes)
         //     return item.attributes
         // } else {
@@ -173,7 +173,7 @@ extension MyFSVolume: FSVolume.Operations {
     ) async throws -> (FSItem, FSFileName) {
         logger.debug("lookupName: \(String(describing: name.string)), \(directory)")
 
-        guard let directory = directory as? DependencyFSNode else {
+        guard let directory = directory as? FSItemProtocol else {
             throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
         }
 
@@ -205,7 +205,7 @@ extension MyFSVolume: FSVolume.Operations {
         throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
 
         // logger.debug("createItem: \(String(describing: name.string)) - \(newAttributes.mode)")
-        // guard let directory = directory as? DependencyFSNode else {
+        // guard let directory = directory as? FSItemProtocol else {
         //     throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
         // }
         // let item = MyFSItem(name: name)
@@ -255,7 +255,7 @@ extension MyFSVolume: FSVolume.Operations {
         fromDirectory directory: FSItem
     ) async throws {
         logger.debug("remove: \(name)")
-        // if let item = item as? DependencyFSNode, let directory = directory as? DependencyFSNode {
+        // if let item = item as? FSItemProtocol, let directory = directory as? FSItemProtocol {
         //     directory.removeItem(item)
         // } else {
         //     throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
@@ -283,7 +283,7 @@ extension MyFSVolume: FSVolume.Operations {
     ) async throws -> FSDirectoryVerifier {
         logger.debug("enumerateDirectory: \(directory)")
 
-        guard let directory = directory as? DependencyFSNode else {
+        guard let directory = directory as? FSItemProtocol else {
             throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
         }
 
@@ -293,12 +293,13 @@ extension MyFSVolume: FSVolume.Operations {
                 idx += 1
                 continue
             }
+            let attrs = item.getAttributes()
             let ok = packer.packEntry(
                 name: name,
-                itemType: item.attributes.type,
-                itemID: item.attributes.fileID,
+                itemType: attrs.type,
+                itemID: attrs.fileID,
                 nextCookie: FSDirectoryCookie(UInt64(idx+1)),
-                attributes: attributes != nil ? item.attributes : nil
+                attributes: attributes != nil ? attrs : nil
             )
             if (!ok)  {
                 // we stop iterating
@@ -394,7 +395,7 @@ extension MyFSVolume: FSVolume.Operations {
 // extension MyFSVolume: FSVolume.OpenCloseOperations {
 
 //     func openItem(_ item: FSItem, modes: FSVolume.OpenModes) async throws {
-//         if let item = item as? DependencyFSNode {
+//         if let item = item as? FSItemProtocol {
 //             logger.debug("open: \(item.name)")
 //         } else {
 //             logger.debug("open: \(item)")
@@ -402,7 +403,7 @@ extension MyFSVolume: FSVolume.Operations {
 //     }
 
 //     func closeItem(_ item: FSItem, modes: FSVolume.OpenModes) async throws {
-//         if let item = item as? DependencyFSNode {
+//         if let item = item as? FSItemProtocol {
 //             logger.debug("close: \(item.name)")
 //         } else {
 //             logger.debug("close: \(item)")
@@ -419,7 +420,7 @@ extension MyFSVolume: FSVolume.Operations {
 
 //         var bytesRead = 0
 
-//         if let item = item as? DependencyFSNode, let data = item.data {
+//         if let item = item as? FSItemProtocol, let data = item.data {
 //             bytesRead = data.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) in
 //                 let length = min(buffer.length, data.count)
 //                 _ = buffer.withUnsafeMutableBytes { dst in
@@ -435,7 +436,7 @@ extension MyFSVolume: FSVolume.Operations {
 //     func write(contents: Data, to item: FSItem, at offset: off_t) async throws -> Int {
 //         logger.debug("write: \(item) - \(offset)")
 
-//         if let item = item as? DependencyFSNode {
+//         if let item = item as? FSItemProtocol {
 //             logger.debug("- write: \(item.name)")
 //             item.data = contents
 //             item.attributes.size = UInt64(contents.count)
@@ -451,7 +452,7 @@ extension MyFSVolume: FSVolume.Operations {
 //     func xattr(named name: FSFileName, of item: FSItem) async throws -> Data {
 //         logger.debug("xattr: \(item) - \(name.string ?? "NA")")
 
-//         if let item = item as? DependencyFSNode {
+//         if let item = item as? FSItemProtocol {
 //             return item.xattrs[name] ?? Data()
 //         } else {
 //             return Data()
@@ -463,7 +464,7 @@ extension MyFSVolume: FSVolume.Operations {
 //     ) async throws {
 //         logger.debug("setXattrOf: \(item)")
 
-//         if let item = item as? DependencyFSNode {
+//         if let item = item as? FSItemProtocol {
 //             item.xattrs[name] = value
 //         }
 //     }
@@ -471,7 +472,7 @@ extension MyFSVolume: FSVolume.Operations {
 //     func xattrs(of item: FSItem) async throws -> [FSFileName] {
 //         logger.debug("listXattrs: \(item)")
 
-//         if let item = item as? DependencyFSNode {
+//         if let item = item as? FSItemProtocol {
 //             return Array(item.xattrs.keys)
 //         } else {
 //             return []
