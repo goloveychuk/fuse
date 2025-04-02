@@ -48,9 +48,17 @@ struct ZipEntry {  //todo minimal
     let localHeaderOffset: UInt32
 }
 
-enum ZipID {
+enum ZipID: CustomDebugStringConvertible {
     case noChildren
     case ind(Int)
+    var debugDescription: String {
+        switch self {
+        case .noChildren:
+            return "ZipID.noChildren"
+        case .ind(let index):
+            return "ZipID.ind(\(index))"
+        }
+    }
 }
 
 extension String {
@@ -69,6 +77,23 @@ extension String {
     }
 }
 
+typealias ChildrenMap = [[PathSegment: ZipID]]
+
+extension ChildrenMap {
+    func print(ind: Int = 0, depth: Int = 0) -> String {
+        var result = ""
+        for item in self[ind] {
+            let key = item.key
+            let value = item.value
+            result += String(repeating: "   ", count: depth) + "\(key):\n"
+            if case .ind(let index) = value {
+                result += self.print(ind: index, depth: depth+1)
+            }
+        }
+        return result
+    }
+}
+
 class ListableZip {
 
     private static let SAFE_TIME: Date = Date(timeIntervalSince1970: 456_789_000)
@@ -81,12 +106,12 @@ class ListableZip {
 
     private let allEntries: [ZipEntry]
 
-    private let childrenMap: [[PathSegment: ZipID]]
+    private let childrenMap: ChildrenMap
 
     init(fileURL: URL) throws {
         let entries = try ListableZip.readZipEntries(fileURL: fileURL)
         allEntries = entries
-        var childrenMap = [[PathSegment: ZipID]]()
+        var childrenMap = ChildrenMap()
 
         var nameToIdMap: [String: ZipID] = [String: ZipID]()
         func addEntry(parent: String, child: String?) throws -> ZipID {
@@ -99,12 +124,13 @@ class ListableZip {
                 childrenMap.append([:])
                 parentId = newIndex
             }
-            if let child = child {
+            if var child = child {
                 var childId: ZipID
-                if (child.last != "/") {
-                    childId = ZipID.noChildren
+                if (child.last == "/") {
+                    childId = try addEntry(parent: parent+child, child: nil)
+                    child = String(child.dropLast())
                 } else {
-                    childId = try addEntry(parent: parent+"/"+child, child: nil)
+                    childId = ZipID.noChildren
                 }
                 guard case .ind(let parentId) = parentId else {
                     throw ZipError.invalidListing("Cannot set children for file")
@@ -127,7 +153,7 @@ class ListableZip {
                 name = parent
                 parent = "/"
             } else {
-                parent = parent + "/"
+                parent = "/" + parent + "/"
             }
             if (isDir) {
                 name = name?.appending("/")
@@ -138,6 +164,7 @@ class ListableZip {
 
             // let parent =
         }
+        let stringified = childrenMap.print()
         self.childrenMap = childrenMap
     }
 
