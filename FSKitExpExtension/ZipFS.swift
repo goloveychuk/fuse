@@ -1,19 +1,7 @@
 import Foundation
 import Darwin
 
-enum ZipSignature {
-    static let CENTRAL_DIRECTORY: UInt32 = 0x02014b50
-    static let END_OF_CENTRAL_DIRECTORY: UInt32 = 0x06054b50
-}
 
-let ZIP_UNIX: UInt8 = 3
-let noCommentCDSize = 22
-
-enum ZipConstants {
-    static let SAFE_TIME: Date = Date(timeIntervalSince1970: 456789000)
-    static let S_IFMT: UInt32 = 0xF000  // File type mask
-    static let S_IFLNK: UInt32 = 0xA000 // Symbolic link
-}
 
 enum ZipError: Error {
     case invalidZipFile(String)
@@ -46,6 +34,14 @@ struct ZipEntry {
 
 class ListableZip {
     
+    static let SAFE_TIME: Date = Date(timeIntervalSince1970: 456789000)
+    // static let S_IFMT: UInt32 = 0xF000  // File type mask
+    // static let S_IFLNK: UInt32 = 0xA000 // Symbolic link
+    static let ZIP_UNIX: UInt8 = 3
+    static let noCommentCDSize = 22
+    static let CENTRAL_DIRECTORY: UInt32 = 0x02014b50
+    static let END_OF_CENTRAL_DIRECTORY: UInt32 = 0x06054b50
+
     static func create(fileURL: URL) throws -> ListableZip {
         let entries = try readZipEntries(fileURL: fileURL)
         for entry in entries {
@@ -79,7 +75,7 @@ class ListableZip {
         
         if eocdBuffer.count == noCommentCDSize {
             let signature = eocdBuffer.loadLittleEndian(0, as: UInt32.self)
-            if signature == ZipSignature.END_OF_CENTRAL_DIRECTORY {
+            if signature == END_OF_CENTRAL_DIRECTORY {
                 eocdOffset = 0
             }
         }
@@ -93,7 +89,7 @@ class ListableZip {
             // Find EOCD signature
             for i in stride(from: eocdBuffer.count - 4, through: 0, by: -1) {
                 let signature = eocdBuffer.loadLittleEndian(i, as: UInt32.self)
-                if signature == ZipSignature.END_OF_CENTRAL_DIRECTORY {
+                if signature == END_OF_CENTRAL_DIRECTORY {
                     eocdOffset = i
                     break
                 }
@@ -146,7 +142,7 @@ class ListableZip {
             }
             
             let signature = cdBuffer.loadLittleEndian(offset, as: UInt32.self)
-            if signature != ZipSignature.CENTRAL_DIRECTORY {
+            if signature != CENTRAL_DIRECTORY {
                 throw ZipError.zipArchiveInconsistent
             }
             
@@ -178,7 +174,7 @@ class ListableZip {
                 throw ZipError.invalidZipFile("Invalid ZIP file")
             }
             
-            let isSymbolicLink = os == ZIP_UNIX && ((externalAttributes >> 16) & ZipConstants.S_IFMT) == ZipConstants.S_IFLNK
+            let isSymbolicLink = os == ZIP_UNIX && ((UInt16(externalAttributes >> 16)) & S_IFMT) == S_IFLNK //todo check UInt16()
             
             entries.append(ZipEntry(
                 name: name,
@@ -189,7 +185,7 @@ class ListableZip {
                 crc: crc,
                 compressedSize: compressedSize,
                 externalAttributes: externalAttributes,
-                mtime: ZipConstants.SAFE_TIME,
+                mtime: SAFE_TIME,
                 localHeaderOffset: localHeaderOffset
             ))
             

@@ -24,7 +24,7 @@ final class AtomicInt {
     // }
 }
 
-final class MyFSItem: FSItem {
+final class _MyFSItem: FSItem {
     
     // private static var id = AtomicInt(Int64(FSItem.Identifier.rootDirectory.rawValue + 1))
     static func getNextID() -> UInt64 {
@@ -34,13 +34,13 @@ final class MyFSItem: FSItem {
     }
     
     let name: FSFileName
-    let id = MyFSItem.getNextID()
+    let id: UInt64 = _MyFSItem.getNextID()
     
     var attributes = FSItem.Attributes()
     var xattrs: [FSFileName: Data] = [:]
     var data: Data?
     
-    private(set) var children: [FSFileName: MyFSItem] = [:]
+    private(set) var children: [FSFileName: _MyFSItem] = [:]
     
     init(name: FSFileName) {
         self.name = name
@@ -58,11 +58,11 @@ final class MyFSItem: FSItem {
         attributes.modifyTime = timespec
     }
     
-    func addItem(_ item: MyFSItem) {
+    func addItem(_ item: _MyFSItem) {
         children[item.name] = item
     }
     
-    func removeItem(_ item: MyFSItem) {
+    func removeItem(_ item: _MyFSItem) {
         children[item.name] = nil
     }
 }

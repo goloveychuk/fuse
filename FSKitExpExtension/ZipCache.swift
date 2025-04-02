@@ -1,3 +1,4 @@
+import FSKit
 import Foundation
 
 typealias PathSegment = String
@@ -64,46 +65,88 @@ struct DependencyNode: Decodable {
     }
 }
 
-class DependencyFSNode {
-    let dependencyNode: DependencyNode
-    var children = [PathSegment: DependencyFSNode]()
+final class DependencyFSNode: FSItem {
+    private static let IdStep = UInt64(10 ^ 7)  // 10 millions files per zip archive.
+
+    private let dependencyNode: DependencyNode
+    private let fileId: FSItem.Identifier
+    private let parentId: FSItem.Identifier
+    private var children = [PathSegment: DependencyFSNode]()
     private var cachedZip: CachedZip? = nil
-    init(dependencyNode: DependencyNode) {
+
+    private let uid = getuid()
+    private var gid = getgid()
+
+    init(dependencyNode: DependencyNode, fileId: FSItem.Identifier, parentId: FSItem.Identifier) {
         self.dependencyNode = dependencyNode
+        self.fileId = fileId
+        self.parentId = parentId
+
     }
 
     static func buildTree(from node: DependencyNode) -> DependencyFSNode {
         var zipCache = [PathSegment: CachedZip]()
-        let root = DependencyFSNode(dependencyNode: node)
+        var prevId = FSItem.Identifier(rawValue: IdStep)!
+
+        let root = DependencyFSNode(
+            dependencyNode: node, fileId: .rootDirectory, parentId: .parentOfRoot)
         var toVisit = [root]
         while !toVisit.isEmpty {
             let currentNode = toVisit.removeFirst()
             if let target = currentNode.dependencyNode.target {
-                    switch target {
-                    case .zipped(let zipPath, _):
-                        if let cachedZip = zipCache[zipPath] {
-                            currentNode.cachedZip = cachedZip
-                        } else {
-                            let newCachedZip: CachedZip = CachedZip(zipPath: zipPath)
-                            zipCache[zipPath] = newCachedZip
-                            currentNode.cachedZip = newCachedZip
-                        }
-                    case .regular(_):
-                        break
+                switch target {
+                case .zipped(let zipPath, _):
+                    if let cachedZip = zipCache[zipPath] {
+                        currentNode.cachedZip = cachedZip
+                    } else {
+                        let newCachedZip: CachedZip = CachedZip(zipPath: zipPath)
+                        zipCache[zipPath] = newCachedZip
+                        currentNode.cachedZip = newCachedZip
                     }
+                case .regular(_):
+                    break
                 }
+            }
             for (name, childNode) in currentNode.dependencyNode.children {
-                let child = DependencyFSNode(dependencyNode: childNode)
+                let child = DependencyFSNode(
+                    dependencyNode: childNode, fileId: prevId, parentId: currentNode.fileId)
+                prevId = FSItem.Identifier(rawValue: prevId.rawValue + IdStep)!  //todo reuse id for same zip
                 currentNode.children[name] = child
                 toVisit.append(child)
             }
         }
         return root
     }
+
+    func getChildren() -> [(FSFileName, DependencyFSNode)] {
+        return children.map {
+            (FSFileName(string: $0.key), $0.value)
+        }
+    }
+
+    func getChild(name: FSFileName) -> DependencyFSNode? {
+        guard let name = name.string else {
+            return nil
+        }
+        return children[name]
+    }
+    
+    var attributes: FSItem.Attributes {
+        let attr = FSItem.Attributes()
+        attr.parentID = parentId
+        attr.fileID = fileId
+        attr.size = 0
+        attr.allocSize = 0
+        attr.uid = uid
+        attr.gid = gid
+        attr.type = .directory
+        attr.mode = UInt32(S_IFDIR | 0o755)
+        return attr
+    }
+
 }
 
 class CachedZip {
-    // Replace POSIX mutex with POSIX read-write mutex
     private var rwlock: pthread_rwlock_t = pthread_rwlock_t()
     var val: ListableZip?
     let zipPath: String
@@ -113,6 +156,11 @@ class CachedZip {
     }
     deinit {
         pthread_rwlock_destroy(&rwlock)
+    }
+    func clear() {
+        pthread_rwlock_wrlock(&rwlock)
+        self.val = nil
+        pthread_rwlock_unlock(&rwlock)
     }
     func get() throws -> ListableZip {
         pthread_rwlock_rdlock(&rwlock)
