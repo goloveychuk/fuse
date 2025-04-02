@@ -9,6 +9,6 @@
 
 umount /tmp/TestVol || true
 mount -F -t MyFS -o asdf=./fsdfsd -v  /dev/disk5 /tmp/TestVol
-biggest_pid=$(pgrep FSKitExp | sort -n | tail -1 | tr -d ' ')
+biggest_pid=$(pgrep FSKitExpExtension | sort -n | tail -1 | tr -d ' ')
 echo "FSKIT PID: $biggest_pid"
 echo $biggest_pid | pbcopy
