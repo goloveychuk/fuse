@@ -24,22 +24,8 @@ enum ZipError: Error {
 extension Data {
     //todo check all loadLittleEndian calls
     func loadLittleEndian<T: FixedWidthInteger>(_ offset: Int, as type: T.Type) -> T {
-        let size = MemoryLayout<T>.size
-        return withUnsafeBytes { rawBuffer -> T in
-            let pointer = rawBuffer.baseAddress!.advanced(by: offset)
-            if Int(bitPattern: pointer) % MemoryLayout<T>.alignment == 0 {
-                // Aligned: use direct load
-                return pointer.load(as: T.self).littleEndian
-
-            } else {
-                // Not aligned: fall back to manual reading
-                var value: T = 0
-                for i in 0..<size {
-                    let byte = T(rawBuffer[offset + i])
-                    value |= byte << (8 * i)
-                }
-                return T(littleEndian: value)
-            }
+        return withUnsafeBytes { rawBuffer in
+            return rawBuffer.loadUnaligned(as: T.self).littleEndian
         }
     }
 }
@@ -57,32 +43,19 @@ struct ZipEntry {
     let localHeaderOffset: UInt32
 }
 
-struct ZipEntryIterator: IteratorProtocol, Sequence {
-    typealias Element = ZipEntry
-    
-    private var entries: [ZipEntry]
-    private var index: Int = 0
-    
-    init(entries: [ZipEntry]) {
-        self.entries = entries
-    }
-    
-    mutating func next() -> ZipEntry? {
-        guard index < entries.count else {
-            return nil
-        }
-        defer { index += 1 }
-        return entries[index]
-    }
-    
-    func makeIterator() -> ZipEntryIterator {
-        return self
-    }
-}
 
-class ZipReader {
+class ListableZip {
     
-    static func readZip(fileURL: URL) throws -> [ZipEntry] {
+    static func create(fileURL: URL) throws -> ListableZip {
+        let entries = try readZipEntries(fileURL: fileURL)
+        for entry in entries {
+            let parts = entry.name.split(separator: "/")
+        }
+
+        return ListableZip()
+    }
+
+    private static func readZipEntries(fileURL: URL) throws -> [ZipEntry] {
         let fileHandle = try FileHandle(forReadingFrom: fileURL)
         defer {
             try? fileHandle.close()

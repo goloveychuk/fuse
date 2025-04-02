@@ -12,7 +12,9 @@ import os
 final class MyFSVolume: FSVolume {
     
     private let resource: FSResource
-    var mount: FSTaskOptions? = nil
+
+    private var depTree: DependencyNode?
+    var mount3: FSTaskOptions? = nil
     
     private let logger = Logger(subsystem: "FSKitExp", category: "MyFSVolume")
     
@@ -108,8 +110,10 @@ extension MyFSVolume: FSVolume.Operations {
     
     
     func activate(options: FSTaskOptions) async throws -> FSItem {
-        // self.mount = options
+        self.mount3 = options
         logger.debug("activate")
+        let data = try Data(contentsOf: URL(filePath: "/Users/vadymh/Library/Containers/app.badim.FSKitExpExtension/data/deptree.json"))
+        self.depTree = try DependencyNode.fromJSONData(data)
         return root
     }
     
@@ -118,7 +122,7 @@ extension MyFSVolume: FSVolume.Operations {
     }
     
     func mount(options: FSTaskOptions) async throws {
-        // self.mount = options
+
         logger.debug("mount")
     }
     
@@ -190,37 +194,6 @@ extension MyFSVolume: FSVolume.Operations {
         inDirectory directory: FSItem,
         attributes newAttributes: FSItem.SetAttributesRequest
     ) async throws -> (FSItem, FSFileName) {
-        // Function to read file into string
-        func readFileIntoString(path: String) throws -> Data {
-            // let inspirationsDirectory = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)
-            
-            // let url = inspirationsDirectory[0].appendingPathComponent("prepared.json")
-            let url = URL(fileURLWithPath: path)
-            // let isAccessing = url.startAccessingSecurityScopedResource()
-            do {
-                try Data(contentsOf: url)
-            } catch {
-                logger.error("Error reading file: \(error.localizedDescription)")
-            }
- 
-            guard let data = try? Data(contentsOf: url) else {
-                throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
-            }
-            
-            // guard let string = String(data: data, encoding: .utf8) else {
-            //     throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
-            // }
-            // if isAccessing {
-            //     url.stopAccessingSecurityScopedResource()
-            // }
-
-            
-            return data
-        }
-
-       let res = try? readFileIntoString(path: "/Users/vadymh/Library/Containers/app.badim.FSKitExpExtension/Data/asd.txt")
-        let res2 = try? readFileIntoString(path: "/Users/vadymh/Library/Containers/app.badim.FSKitExpExtension/Data/Downloads/topology.json")
-        let res3 = try? readFileIntoString(path: "/Users/vadymh/Library/Containers/app.badim.FSKitExpExtension/Data/@aashutoshrathi-word-wrap-npm-1.2.6-55ddd5ef31-10c0.zip")
         logger.debug("createItem: \(String(describing: name.string)) - \(newAttributes.mode)")
         
         guard let directory = directory as? MyFSItem else {
@@ -242,7 +215,9 @@ extension MyFSVolume: FSVolume.Operations {
         attributes newAttributes: FSItem.SetAttributesRequest,
         linkContents contents: FSFileName
     ) async throws -> (FSItem, FSFileName) {
-        let res4 = try? ZipReader.readZip(fileURL: URL(fileURLWithPath: "/Users/vadymh/Library/Containers/app.badim.FSKitExpExtension/Data/@aashutoshrathi-word-wrap-npm-1.2.6-55ddd5ef31-10c0.zip2"))
+        // let res4 = try? ListableZip.readZip(fileURL: URL(fileURLWithPath: "/Users/vadymh/Library/Containers/app.badim.FSKitExpExtension/Data/@aashutoshrathi-word-wrap-npm-1.2.6-55ddd5ef31-10c0.zip"))
+        // let asd  = "ads"
+        // let urls = self.mount3!.taskOptions.map({ self.mount3!.url(forOption: $0) })
         logger.debug("createSymbolicLink: \(name)")
         throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
     }
