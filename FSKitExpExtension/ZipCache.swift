@@ -86,20 +86,41 @@ final class ZipFSNode: FSItem, FSItemProtocol {
         self.zipId = zipId
         self.parentId = parentId
     }
-    func getChildren() -> [(FSFileName, FSItemProtocol)] {
-        return []
+    func getChildren() throws -> [(FSFileName, FSItemProtocol)] {
+        let zip = try cachedZip.get()
+        let zipEntries = zip.getChildren(forId: zipId)
+        return zipEntries.map {
+            (FSFileName(string: $0.key), ZipFSNode(cachedZip: cachedZip, zipId: $0.value, parentId: getFsId()))
+        }
     }
 
-    func getChild(name: FSFileName) -> FSItemProtocol? {
+    func getChild(name: FSFileName) throws -> FSItemProtocol? {
+        let zip = try cachedZip.get()
+        let zipEntries = zip.getChildren(forId: zipId)
+        guard let name = name.string else { //todo replace all with bytes??
+            return nil
+        }
+        if let zipEntry = zipEntries[name] {
+            return ZipFSNode(cachedZip: cachedZip, zipId: zipEntry, parentId: parentId)
+        }
         return nil
+    }
+
+    func getFsId() -> FSItem.Identifier {
+        switch zipId {
+            case .dir(let listingId):
+                return FSItem.Identifier(rawValue: parentId.rawValue + UInt64(listingId))!
+            case .file(let entryInd):
+                return FSItem.Identifier(rawValue: 10000 + parentId.rawValue +  UInt64(entryInd))! //todo
+        }
     }
 
     func getAttributes() throws -> FSItem.Attributes {
         let attr = FSItem.Attributes()
         attr.parentID = parentId
+        attr.fileID = getFsId()
         switch zipId {
         case .dir(_):
-            attr.fileID = FSItem.Identifier(rawValue: UInt64.random(in: 0...10_230_023_023))!
             attr.size = 0
             attr.allocSize = 0
             attr.linkCount = 1 
@@ -282,7 +303,7 @@ class CachedZip {
                     pthread_rwlock_unlock(&rwlock)
                     return newZip
                 } catch {
-                    state = .error(error)
+                    // state = .error(error)
                     pthread_rwlock_unlock(&rwlock)
                     throw error
                 }

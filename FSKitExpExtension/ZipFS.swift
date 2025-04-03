@@ -104,7 +104,7 @@ class ListableZip {
     private let listings: Listings
 
     func getChildren(forId: ZipID) -> [PathSegment: ZipID] {
-        guard case .file(let index) = forId else {
+        guard case .dir(let index) = forId else {
             return [:] //todo throw
         }
         return listings[index]
@@ -141,11 +141,12 @@ class ListableZip {
         _ = try addDirectory(parent: "/")
 
         for (ind, entry) in entries.enumerated() {
-            let isDir = entry.name == "/"
+            let isDir = entry.name.last == "/"
             var path = entry.name
             var zipID: ZipID
             if (isDir) {
                 // todo check for dir
+
                 zipID = try addDirectory(parent: entry.name)
                 path = String(path.dropLast())
             } else {
@@ -154,9 +155,10 @@ class ListableZip {
             var (parent, name) = path.splitOnceFromRight(separator: "/")
             if name == nil {
                 name = parent
-                parent = ""
+                parent = "/"
+            } else {
+                parent = parent + "/"
             }
-            parent = "/" + parent
             try addListings(parent: parent, childName: name!, childID: zipID)
         }
         // let stringified = listings.print()
