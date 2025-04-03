@@ -212,7 +212,7 @@ final class DependencyFSNode: FSItem, FSItemProtocol {
             try cachedRootId
             ?? {
                 let rootId = try listableZip.getIdForPath(path: zipInfo!.subpath)
-                // cachedRootId = rootId // todo mutex?
+                cachedRootId = rootId // todo mutex?
                 return rootId
             }()
         return rootId
@@ -326,11 +326,11 @@ class CachedZip {
             case .notLoaded:
                 do {
                     let newZip = try ListableZip(fileURL: URL(fileURLWithPath: zipPath))
-                    // state = .loaded(newZip) //todo!!
+                    state = .loaded(newZip)
                     pthread_rwlock_unlock(&rwlock)
                     return newZip
                 } catch {
-                    // state = .error(error)
+                    state = .error(error)
                     pthread_rwlock_unlock(&rwlock)
                     throw error
                 }
