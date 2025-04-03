@@ -64,10 +64,12 @@ extension MyFSVolume: FSVolume.Operations {
         capabilities.supportsHardLinks = true
         capabilities.supportsSymbolicLinks = true
         capabilities.supportsPersistentObjectIDs = true
-        capabilities.doesNotSupportVolumeSizes = true
-        capabilities.supportsHiddenFiles = true
+        capabilities.supportsHiddenFiles = true //??
         capabilities.supports64BitObjectIDs = true
         capabilities.caseFormat = .insensitiveCasePreserving
+
+        capabilities.doesNotSupportVolumeSizes = true
+        // capabilities.doesNotSupportImmutableFiles = true ??
         return capabilities
     }
 
@@ -76,13 +78,13 @@ extension MyFSVolume: FSVolume.Operations {
 
         let result = FSStatFSResult(fileSystemTypeName: "MyFS")
 
-        result.blockSize = 1_024_000
-        result.ioSize = 1_024_000
-        result.totalBlocks = 1_024_000
-        result.availableBlocks = 1_024_000
-        result.freeBlocks = 1_024_000
-        result.totalFiles = 1_024_000
-        result.freeFiles = 1_024_000
+        // result.blockSize = 1_024_000
+        // result.ioSize = 1_024_000
+        // result.totalBlocks = 1_024_000
+        // result.availableBlocks = 1_024_000
+        // result.freeBlocks = 1_024_000
+        // result.totalFiles = 1_024_000
+        // result.freeFiles = 1_024_000
 
         return result
     }
@@ -99,7 +101,7 @@ extension MyFSVolume: FSVolume.Operations {
                             "/Users/vadymh/Library/Containers/app.badim.FSKitExpExtension/data/deptree.json"
                     ))
                 let depTree = try DependencyNode.fromJSONData(data)
-                let depFsNode = DependencyFSNode.buildTree(from: depTree)
+                let depFsNode = BaseDependencyFSNode.buildTree(from: depTree)
                 return depFsNode
             }()
             return root
@@ -192,8 +194,10 @@ extension MyFSVolume: FSVolume.Operations {
     func readSymbolicLink(
         _ item: FSItem
     ) async throws -> FSFileName {
-        logger.debug("readSymbolicLink: \(item)")
-        throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        guard let item = item as? FSItemProtocol else {
+            throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
+        }
+        return try item.readSymbolicLink()
     }
 
     func createItem(
@@ -271,7 +275,7 @@ extension MyFSVolume: FSVolume.Operations {
         overItem: FSItem?
     ) async throws -> FSFileName {
         logger.debug("rename: \(item)")
-        throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        throw fs_errorForPOSIXError(POSIXError.ENOTSUP.rawValue)
     }
 
     func enumerateDirectory(

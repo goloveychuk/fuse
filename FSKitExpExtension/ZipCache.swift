@@ -1,6 +1,6 @@
+import Compression
 import FSKit
 import Foundation
-import Compression
 
 typealias PathSegment = String
 
@@ -74,6 +74,8 @@ protocol FSItemProtocol: FSItem {
     func getAttributes() throws -> FSItem.Attributes
 
     func readData(offset: off_t, length: Int, into buffer: FSMutableFileDataBuffer) throws -> Int
+
+    func readSymbolicLink() throws -> FSFileName
 }
 
 extension FSItem.Identifier {
@@ -143,7 +145,7 @@ final class ZipFSNode: FSItem, FSItemProtocol {
             switch zipEntry.compressionMethod {
             case .deflate:
                 throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)  //todo
-                // compression_decode_buffer(UnsafeMutablePointer<UInt8>, Int, UnsafePointer<UInt8>, Int, UnsafeMutableRawPointer?, compression_algorithm)
+            // compression_decode_buffer(UnsafeMutablePointer<UInt8>, Int, UnsafePointer<UInt8>, Int, UnsafeMutableRawPointer?, compression_algorithm)
 
             case .store:
                 return try buffer.withUnsafeMutableBytes { rawBuffer in
@@ -154,7 +156,7 @@ final class ZipFSNode: FSItem, FSItemProtocol {
                         length: length,
                         bufferPointer: rawBuffer,
                     )
-                    if bytesRead > 0 { //todo
+                    if bytesRead > 0 {  //todo
                         return bytesRead
                     } else {
                         throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
@@ -162,7 +164,7 @@ final class ZipFSNode: FSItem, FSItemProtocol {
                 }
             }
         case .dir(_):
-            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)  //not supported for dirs
+            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
         }
     }
 
@@ -200,52 +202,64 @@ final class ZipFSNode: FSItem, FSItemProtocol {
 
 typealias ZipInfo = (cachedZip: CachedZip, subpath: String)
 
-final class DependencyFSNode: FSItem, FSItemProtocol {
-    private static let IdStep = UInt64(10 ^ 7)  // 10 millions files per zip archive.
+class BaseDependencyFSNode: FSItem {
+    internal let dependencyNode: DependencyNode
+    internal let fileId: FSItem.Identifier
+    internal let parentId: FSItem.Identifier
+    internal var children = [PathSegment: BaseDependencyFSNode2]()
 
-    private let dependencyNode: DependencyNode
-    private let fileId: FSItem.Identifier
-    private let parentId: FSItem.Identifier
-    private var children = [PathSegment: DependencyFSNode]()
-    private var zipInfo: ZipInfo? = nil
-    private var cachedRootId: ZipID?
     init(dependencyNode: DependencyNode, fileId: FSItem.Identifier, parentId: FSItem.Identifier) {
         self.dependencyNode = dependencyNode
         self.fileId = fileId
         self.parentId = parentId
-
     }
 
-    private var cachedZip: CachedZip? {
-        return zipInfo?.cachedZip
+    static func create(dependencyNode: DependencyNode, fileId: FSItem.Identifier, parentId: FSItem.Identifier) -> BaseDependencyFSNode2 {
+        switch dependencyNode.linkType {
+            case .HARD:
+                let node = HardDependencyFSNode(
+                    dependencyNode: dependencyNode, fileId: fileId, parentId: parentId)
+
+                return node
+            
+            case .SOFT:
+                let node = SoftDependencyFSNode(dependencyNode: dependencyNode, fileId: fileId, parentId: parentId)
+                return node
+        }
     }
 
-    static func buildTree(from node: DependencyNode) -> DependencyFSNode {
+    private static let IdStep = UInt64(10 ^ 7)  // 10 millions files per zip archive.
+    static func buildTree(from node: DependencyNode) -> BaseDependencyFSNode {
         var zipCache = [PathSegment: CachedZip]()
         var prevId = FSItem.Identifier.create(val: IdStep)
 
-        let root = DependencyFSNode(
+        let root = BaseDependencyFSNode.create(
             dependencyNode: node, fileId: .rootDirectory, parentId: .parentOfRoot)
         var toVisit = [root]
         while !toVisit.isEmpty {
             let currentNode = toVisit.removeFirst()
             if let target = currentNode.dependencyNode.target {
-                switch target {
-                case .zipped(let zipPath, let subpath):
-                    if let cachedZip = zipCache[zipPath] {
-                        currentNode.zipInfo = (cachedZip, subpath)
-                        cachedZip.refCount += 1
-                    } else {
-                        let cachedZip: CachedZip = CachedZip(zipPath: zipPath)
-                        zipCache[zipPath] = cachedZip
-                        currentNode.zipInfo = (cachedZip, subpath)
+                switch currentNode.dependencyNode.linkType {
+                case .HARD:
+                    switch target {
+                    case .zipped(let zipPath, let subpath):
+                        if let cachedZip = zipCache[zipPath] {
+                            currentNode.zipInfo = (cachedZip, subpath)
+                            cachedZip.refCount += 1
+                        } else {
+                            let cachedZip: CachedZip = CachedZip(zipPath: zipPath)
+                            zipCache[zipPath] = cachedZip
+                            currentNode.zipInfo = (cachedZip, subpath)
+                        }
+                    case .regular(_):
+                        break  //todo impl
                     }
-                case .regular(_):
+                case .SOFT:
                     break
                 }
             }
             for (name, childNode) in currentNode.dependencyNode.children {
-                let child = DependencyFSNode(
+                let child = BaseDependencyFSNode.create(
                     dependencyNode: childNode, fileId: prevId, parentId: currentNode.fileId)
                 prevId = prevId.advance(by: IdStep)  //todo reuse id for same zip
                 currentNode.children[name] = child
@@ -253,6 +267,48 @@ final class DependencyFSNode: FSItem, FSItemProtocol {
             }
         }
         return root
+    }
+}
+
+typealias BaseDependencyFSNode2 = BaseDependencyFSNode & FSItemProtocol
+
+final class SoftDependencyFSNode: BaseDependencyFSNode, FSItemProtocol {
+    func getChildren() throws -> [(FSFileName, FSItemProtocol)] {
+        throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)  //not supported for symlinks
+    }
+
+    func getChild(name: FSFileName) throws -> FSItemProtocol? {
+        throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)  //not supported for symlinks
+    }
+
+    func getAttributes() throws -> FSItem.Attributes {
+        let attr = FSItem.Attributes()
+        attr.parentID = parentId
+        attr.fileID = fileId
+        attr.size = 0
+        attr.allocSize = 0
+        attr.linkCount = 1
+        attr.type = .symlink
+        attr.mode = UInt32(S_IFLNK | 0o644)  //todo get original, because there are executable
+        return attr
+    }
+
+    func readData(offset: off_t, length: Int, into buffer: FSMutableFileDataBuffer) throws -> Int {
+        throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)  //not supported for symlinks
+    }
+    func readSymbolicLink() throws -> FSFileName {
+        return FSFileName(string: dependencyNode.target?.path ?? "")!
+    }
+}
+
+final class HardDependencyFSNode: BaseDependencyFSNode, FSItemProtocol {
+
+    private var zipInfo: ZipInfo? = nil
+    private var cachedRootId: ZipID?
+    
+
+    private var cachedZip: CachedZip? {
+        return zipInfo?.cachedZip
     }
 
     private func getRootId(listableZip: ListableZip) throws -> ZipID {
@@ -321,6 +377,10 @@ final class DependencyFSNode: FSItem, FSItemProtocol {
         attr.type = .directory
         attr.mode = UInt32(S_IFDIR | 0o755)  //by default node_modules created with 755
         return attr
+    }
+
+    func readSymbolicLink() throws -> FSFileName {
+        throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)  //not supported for dirs
     }
 }
 
