@@ -65,42 +65,66 @@ struct DependencyNode: Decodable {
     }
 }
 
-protocol FSItemProtocol {
-    func getChildren() -> [(FSFileName, DependencyFSNode)] 
+protocol FSItemProtocol: FSItem {
+    func getChildren() throws -> [(FSFileName, FSItemProtocol)]
 
-    func getChild(name: FSFileName) -> DependencyFSNode? 
-    
-    func getAttributes() -> FSItem.Attributes
+    func getChild(name: FSFileName) throws -> FSItemProtocol?
+
+    func getAttributes() throws -> FSItem.Attributes
 }
 
 private let uid = getuid()
 private let gid = getgid()
 
+final class ZipFSNode: FSItem, FSItemProtocol {
+    private let cachedZip: CachedZip
+    private let zipId: ZipID
+    private let parentId: FSItem.Identifier
+    // private var zipEntry: ZipEntry
+    init(cachedZip: CachedZip, zipId: ZipID, parentId: FSItem.Identifier) {
+        self.cachedZip = cachedZip
+        self.zipId = zipId
+        self.parentId = parentId
+    }
+    func getChildren() -> [(FSFileName, FSItemProtocol)] {
+        return []
+    }
 
-// final class ZipFSNode: FSItem, FSItemProtocol {
-//     private var cachedZip: CachedZip
-//     // private var zipEntry: ZipEntry
-//     func getChildren() -> [(FSFileName, DependencyFSNode)]  {
+    func getChild(name: FSFileName) -> FSItemProtocol? {
+        return nil
+    }
 
-//     }
+    func getAttributes() throws -> FSItem.Attributes {
+        let attr = FSItem.Attributes()
+        attr.parentID = parentId
+        switch zipId {
+        case .dir(_):
+            attr.fileID = FSItem.Identifier(rawValue: UInt64.random(in: 0...10_230_023_023))!
+            attr.size = 0
+            attr.allocSize = 0
+            attr.linkCount = 1 
+            attr.type = .directory
+            attr.mode = UInt32(S_IFDIR | 0o755)  //by default node_modules created with 755
+        case .file(let entryInd):
+            let listableZip = try self.cachedZip.get()
+            let zipEntry = listableZip.getEntry(index: entryInd)
+            attr.linkCount = cachedZip.refCount
+            attr.size = UInt64(zipEntry.size)
+            attr.allocSize = UInt64(zipEntry.compressedSize) //todo not sure
+            if (zipEntry.isSymbolicLink) {
+                attr.type = .symlink
+                attr.mode = UInt32(S_IFLNK | 0o644) //todo get original, because there are executable
+            } else {
+                attr.type = .file        
+                attr.mode = UInt32(S_IFREG | 0o644) // todo get original, because there are executable
+            }
+        }
 
-//     func getChild(name: FSFileName) -> DependencyFSNode?  {
-
-//     }
-    
-//     func getAttributes() -> FSItem.Attributes {
-//         let attr = FSItem.Attributes()
-//         attr.parentID = parentId
-//         attr.fileID = fileId
-//         attr.size = UInt64(zipEntry.size)
-//         attr.allocSize = UInt64(zipEntry.compressedSize) //todo not sure
-//         attr.uid = uid
-//         attr.gid = gid
-//         // attr.type = .directory
-//         // attr.mode = UInt32(S_IFDIR | 0o755) //by default node_modules created with 755
-//         return attr
-//     }
-// }
+        attr.uid = uid
+        attr.gid = gid
+        return attr
+    }
+}
 
 final class DependencyFSNode: FSItem, FSItemProtocol {
     private static let IdStep = UInt64(10 ^ 7)  // 10 millions files per zip archive.
@@ -111,7 +135,6 @@ final class DependencyFSNode: FSItem, FSItemProtocol {
     private var children = [PathSegment: DependencyFSNode]()
     private var cachedZip: CachedZip? = nil
 
-    
     init(dependencyNode: DependencyNode, fileId: FSItem.Identifier, parentId: FSItem.Identifier) {
         self.dependencyNode = dependencyNode
         self.fileId = fileId
@@ -133,6 +156,7 @@ final class DependencyFSNode: FSItem, FSItemProtocol {
                 case .zipped(let zipPath, _):
                     if let cachedZip = zipCache[zipPath] {
                         currentNode.cachedZip = cachedZip
+                        cachedZip.refCount += 1
                     } else {
                         let newCachedZip: CachedZip = CachedZip(zipPath: zipPath)
                         zipCache[zipPath] = newCachedZip
@@ -153,21 +177,30 @@ final class DependencyFSNode: FSItem, FSItemProtocol {
         return root
     }
 
-    func getChildren() -> [(FSFileName, DependencyFSNode)] {
-        let zip = try? cachedZip?.get()
-
-        return children.map {
+    func getChildren() throws -> [(FSFileName, FSItemProtocol)] {
+        var children: [(FSFileName, FSItemProtocol)] = children.map {
             (FSFileName(string: $0.key), $0.value)
         }
+
+        if let cachedZip = cachedZip {
+            let zip = try cachedZip.get().getChildren(forId: ZipID.root)
+            children += zip.map {
+                (
+                    FSFileName(string: $0.key),
+                    ZipFSNode(cachedZip: cachedZip, zipId: $0.value, parentId: fileId)
+                )
+            }
+        }
+        return children
     }
 
-    func getChild(name: FSFileName) -> DependencyFSNode? {
+    func getChild(name: FSFileName) -> FSItemProtocol? {
         guard let name = name.string else {
             return nil
         }
         return children[name]
     }
-    
+
     func getAttributes() -> FSItem.Attributes {
         let attr = FSItem.Attributes()
         attr.parentID = parentId
@@ -177,13 +210,14 @@ final class DependencyFSNode: FSItem, FSItemProtocol {
         attr.uid = uid
         attr.gid = gid
         attr.type = .directory
-        attr.mode = UInt32(S_IFDIR | 0o755) //by default node_modules created with 755
+        attr.mode = UInt32(S_IFDIR | 0o755)  //by default node_modules created with 755
         return attr
     }
 }
 
 class CachedZip {
     private var rwlock: pthread_rwlock_t = pthread_rwlock_t()
+    var refCount : UInt32
     private enum ZipState {
         case notLoaded
         case loaded(ListableZip)
@@ -191,25 +225,26 @@ class CachedZip {
     }
     private var state: ZipState = .notLoaded
     let zipPath: String
-    
+
     init(zipPath: String) {
         self.zipPath = zipPath
+        refCount = 1
         pthread_rwlock_init(&rwlock, nil)
     }
-    
+
     deinit {
         pthread_rwlock_destroy(&rwlock)
     }
-    
+
     func clear() {
         pthread_rwlock_wrlock(&rwlock)
-        self.state = .notLoaded // todo check errored
+        self.state = .notLoaded  // todo check errored
         pthread_rwlock_unlock(&rwlock)
     }
-    
+
     func get() throws -> ListableZip {
         pthread_rwlock_rdlock(&rwlock)
-        
+
         switch state {
         case .loaded(let zip):
             pthread_rwlock_unlock(&rwlock)
@@ -219,10 +254,10 @@ class CachedZip {
             throw error
         case .notLoaded:
             pthread_rwlock_unlock(&rwlock)
-            
+
             // Upgrade to write lock to load the zip
             pthread_rwlock_wrlock(&rwlock)
-            
+
             // Check state again after acquiring write lock
             switch state {
             case .loaded(let zip):

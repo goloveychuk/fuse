@@ -145,7 +145,7 @@ extension MyFSVolume: FSVolume.Operations {
     ) async throws -> FSItem.Attributes {
         if let item = item as? FSItemProtocol {
             // logger.debug("getItemAttributes1: \(item.name), \(desiredAttributes)")
-            return item.getAttributes()
+            return try item.getAttributes()
         } else {
             logger.debug("getItemAttributes2: \(item), \(desiredAttributes)")
             throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
@@ -177,7 +177,7 @@ extension MyFSVolume: FSVolume.Operations {
             throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
         }
 
-        if let item = directory.getChild(name: name) {
+        if let item = try directory.getChild(name: name) {
             return (item, name)
         } else {
             throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
@@ -288,12 +288,12 @@ extension MyFSVolume: FSVolume.Operations {
         }
 
         var idx = 0
-        for (name, item) in directory.getChildren() {
+        for (name, item) in try directory.getChildren() {
             if (idx < cookie.rawValue) {
                 idx += 1
                 continue
             }
-            let attrs = item.getAttributes()
+            let attrs = try item.getAttributes()
             let ok = packer.packEntry(
                 name: name,
                 itemType: attrs.type,

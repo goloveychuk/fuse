@@ -48,16 +48,11 @@ struct ZipEntry {  //todo minimal
     let localHeaderOffset: UInt32
 }
 
-enum ZipID: CustomDebugStringConvertible {
-    case noChildren
-    case ind(Int)
-    var debugDescription: String {
-        switch self {
-        case .noChildren:
-            return "ZipID.noChildren"
-        case .ind(let index):
-            return "ZipID.ind(\(index))"
-        }
+enum ZipID {
+    case file(entryId: Int)
+    case dir(listingId: Int)
+    static var root: ZipID {
+        return .dir(listingId:0)
     }
 }
 
@@ -77,16 +72,16 @@ extension String {
     }
 }
 
-typealias ChildrenMap = [[PathSegment: ZipID]]
+typealias Listings = [[PathSegment: ZipID]]
 
-extension ChildrenMap {
+extension Listings {
     func print(ind: Int = 0, depth: Int = 0) -> String {
         var result = ""
         for item in self[ind] {
             let key = item.key
             let value = item.value
             result += String(repeating: "   ", count: depth) + "\(key):\n"
-            if case .ind(let index) = value {
+            if case .dir(let index) = value {
                 result += self.print(ind: index, depth: depth+1)
             }
         }
@@ -106,66 +101,66 @@ class ListableZip {
 
     private let allEntries: [ZipEntry]
 
-    private let childrenMap: ChildrenMap
+    private let listings: Listings
+
+    func getChildren(forId: ZipID) -> [PathSegment: ZipID] {
+        guard case .file(let index) = forId else {
+            return [:] //todo throw
+        }
+        return listings[index]
+    }
+
+    func getEntry(index: Int) ->  ZipEntry {
+        return allEntries[index]
+    }
 
     init(fileURL: URL) throws {
         let entries = try ListableZip.readZipEntries(fileURL: fileURL)
         allEntries = entries
-        var childrenMap = ChildrenMap()
+        var listings = Listings()
 
-        var nameToIdMap: [String: ZipID] = [String: ZipID]()
-        func addEntry(parent: String, child: String?) throws -> ZipID {
-            var parentId: ZipID
-            if let id = nameToIdMap[parent] {
-                parentId = id
-            } else {
-                let newIndex = ZipID.ind(childrenMap.count)
-                nameToIdMap[parent] = newIndex
-                childrenMap.append([:])
-                parentId = newIndex
+        var nameToIndMap: [String: Int] = [String: Int]()
+
+        func addDirectory(parent: String) throws -> ZipID {
+            if (nameToIndMap[parent] != nil) {
+                throw ZipError.invalidListing("Directory already exists")
             }
-            if var child = child {
-                var childId: ZipID
-                if (child.last == "/") {
-                    childId = try addEntry(parent: parent+child, child: nil)
-                    child = String(child.dropLast())
-                } else {
-                    childId = ZipID.noChildren
-                }
-                guard case .ind(let parentId) = parentId else {
-                    throw ZipError.invalidListing("Cannot set children for file")
-                }
-                childrenMap[parentId][child] = childId
-            }
-            return parentId
+            let newIndex = ZipID.dir(listingId: listings.count)
+            nameToIndMap[parent] = listings.count
+            listings.append([:])
+            return newIndex
         }
 
-        _ = try addEntry(parent: "/", child: nil)
+        func addListings(parent: String, childName: PathSegment, childID: ZipID) throws {
+            guard let parentId = nameToIndMap[parent] else {
+                throw ZipError.invalidListing("Parent directory not found")
+            }
+            listings[parentId][childName] = childID
+        }
 
-        for entry in entries {
+        _ = try addDirectory(parent: "/")
+
+        for (ind, entry) in entries.enumerated() {
+            let isDir = entry.name == "/"
             var path = entry.name
-            let isDir = path.last == "/"
+            var zipID: ZipID
             if (isDir) {
+                // todo check for dir
+                zipID = try addDirectory(parent: entry.name)
                 path = String(path.dropLast())
+            } else {
+                zipID = ZipID.file(entryId: ind) //todo use other array, smaller
             }
             var (parent, name) = path.splitOnceFromRight(separator: "/")
             if name == nil {
                 name = parent
-                parent = "/"
-            } else {
-                parent = "/" + parent + "/"
+                parent = ""
             }
-            if (isDir) {
-                name = name?.appending("/")
-            }
-            _ = try addEntry(parent: parent, child: name)
-
-            // childrenMap[parent]
-
-            // let parent =
+            parent = "/" + parent
+            try addListings(parent: parent, childName: name!, childID: zipID)
         }
-        let stringified = childrenMap.print()
-        self.childrenMap = childrenMap
+        // let stringified = listings.print()
+        self.listings = listings
     }
 
     private static func readZipEntries(fileURL: URL) throws -> [ZipEntry] {
@@ -298,6 +293,10 @@ class ListableZip {
 
             let isSymbolicLink =
                 os == ZIP_UNIX && ((UInt16(externalAttributes >> 16)) & S_IFMT) == S_IFLNK  //todo check UInt16()
+            
+            //todo check 
+            // let isDir =
+            //     os == ZIP_UNIX && ((UInt16(externalAttributes >> 16)) & S_IFMT) == S_IFDIR  //todo check UInt16()
 
             entries.append(
                 ZipEntry(
