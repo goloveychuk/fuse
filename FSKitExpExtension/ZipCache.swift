@@ -194,11 +194,20 @@ final class DependencyFSNode: FSItem, FSItemProtocol {
         return children
     }
 
-    func getChild(name: FSFileName) -> FSItemProtocol? {
+    func getChild(name: FSFileName) throws -> FSItemProtocol? {
         guard let name = name.string else {
             return nil
         }
-        return children[name]
+        if let child = children[name] {
+            return child
+        }
+        if let cachedZip = cachedZip {
+            let zip = try cachedZip.get().getChildren(forId: ZipID.root)
+            if let zipEntry = zip[name] {
+                return ZipFSNode(cachedZip: cachedZip, zipId: zipEntry, parentId: fileId)
+            }
+        }
+        return nil
     }
 
     func getAttributes() -> FSItem.Attributes {
