@@ -103,6 +103,24 @@ class ListableZip {
 
     private let listings: Listings
 
+    func getIdForPath(path: String) throws -> ZipID {
+        var currentId: ZipID = .root
+        for part in path.split(separator: "/") {
+            if (part.isEmpty) {
+                continue
+            }
+            guard case .dir(let listingId) = currentId else {
+                throw ZipError.invalidListing("Invalid path, not dir")
+            }
+            let list = listings[listingId]
+            guard let childId = list[String(part)] else {
+                throw ZipError.invalidListing("Invalid path, cannot found child \(part)")
+            }
+            currentId = childId
+        }
+        return currentId
+    }
+
     func getChildren(forId: ZipID) -> [PathSegment: ZipID] {
         guard case .dir(let index) = forId else {
             return [:] //todo throw

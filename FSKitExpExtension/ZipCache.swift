@@ -90,14 +90,17 @@ final class ZipFSNode: FSItem, FSItemProtocol {
         let zip = try cachedZip.get()
         let zipEntries = zip.getChildren(forId: zipId)
         return zipEntries.map {
-            (FSFileName(string: $0.key), ZipFSNode(cachedZip: cachedZip, zipId: $0.value, parentId: getFsId()))
+            (
+                FSFileName(string: $0.key),
+                ZipFSNode(cachedZip: cachedZip, zipId: $0.value, parentId: getFsId())
+            )
         }
     }
 
     func getChild(name: FSFileName) throws -> FSItemProtocol? {
         let zip = try cachedZip.get()
         let zipEntries = zip.getChildren(forId: zipId)
-        guard let name = name.string else { //todo replace all with bytes??
+        guard let name = name.string else {  //todo replace all with bytes??
             return nil
         }
         if let zipEntry = zipEntries[name] {
@@ -108,10 +111,10 @@ final class ZipFSNode: FSItem, FSItemProtocol {
 
     func getFsId() -> FSItem.Identifier {
         switch zipId {
-            case .dir(let listingId):
-                return FSItem.Identifier(rawValue: parentId.rawValue + UInt64(listingId))!
-            case .file(let entryInd):
-                return FSItem.Identifier(rawValue: 10000 + parentId.rawValue +  UInt64(entryInd))! //todo
+        case .dir(let listingId):
+            return FSItem.Identifier(rawValue: parentId.rawValue + UInt64(listingId))!
+        case .file(let entryInd):
+            return FSItem.Identifier(rawValue: 10000 + parentId.rawValue + UInt64(entryInd))!  //todo
         }
     }
 
@@ -123,7 +126,7 @@ final class ZipFSNode: FSItem, FSItemProtocol {
         case .dir(_):
             attr.size = 0
             attr.allocSize = 0
-            attr.linkCount = 1 
+            attr.linkCount = 1
             attr.type = .directory
             attr.mode = UInt32(S_IFDIR | 0o755)  //by default node_modules created with 755
         case .file(let entryInd):
@@ -131,13 +134,13 @@ final class ZipFSNode: FSItem, FSItemProtocol {
             let zipEntry = listableZip.getEntry(index: entryInd)
             attr.linkCount = cachedZip.refCount
             attr.size = UInt64(zipEntry.size)
-            attr.allocSize = UInt64(zipEntry.compressedSize) //todo not sure
-            if (zipEntry.isSymbolicLink) {
+            attr.allocSize = UInt64(zipEntry.compressedSize)  //todo not sure
+            if zipEntry.isSymbolicLink {
                 attr.type = .symlink
-                attr.mode = UInt32(S_IFLNK | 0o644) //todo get original, because there are executable
+                attr.mode = UInt32(S_IFLNK | 0o644)  //todo get original, because there are executable
             } else {
-                attr.type = .file        
-                attr.mode = UInt32(S_IFREG | 0o644) // todo get original, because there are executable
+                attr.type = .file
+                attr.mode = UInt32(S_IFREG | 0o644)  // todo get original, because there are executable
             }
         }
 
@@ -147,6 +150,8 @@ final class ZipFSNode: FSItem, FSItemProtocol {
     }
 }
 
+typealias ZipInfo = (cachedZip: CachedZip, subpath: String)
+
 final class DependencyFSNode: FSItem, FSItemProtocol {
     private static let IdStep = UInt64(10 ^ 7)  // 10 millions files per zip archive.
 
@@ -154,13 +159,17 @@ final class DependencyFSNode: FSItem, FSItemProtocol {
     private let fileId: FSItem.Identifier
     private let parentId: FSItem.Identifier
     private var children = [PathSegment: DependencyFSNode]()
-    private var cachedZip: CachedZip? = nil
-
+    private var zipInfo: ZipInfo? = nil
+    private var cachedRootId: ZipID?
     init(dependencyNode: DependencyNode, fileId: FSItem.Identifier, parentId: FSItem.Identifier) {
         self.dependencyNode = dependencyNode
         self.fileId = fileId
         self.parentId = parentId
 
+    }
+
+    private var cachedZip: CachedZip? {
+        return zipInfo?.cachedZip
     }
 
     static func buildTree(from node: DependencyNode) -> DependencyFSNode {
@@ -174,14 +183,14 @@ final class DependencyFSNode: FSItem, FSItemProtocol {
             let currentNode = toVisit.removeFirst()
             if let target = currentNode.dependencyNode.target {
                 switch target {
-                case .zipped(let zipPath, _):
+                case .zipped(let zipPath, let subpath):
                     if let cachedZip = zipCache[zipPath] {
-                        currentNode.cachedZip = cachedZip
+                        currentNode.zipInfo = (cachedZip, subpath)
                         cachedZip.refCount += 1
                     } else {
-                        let newCachedZip: CachedZip = CachedZip(zipPath: zipPath)
-                        zipCache[zipPath] = newCachedZip
-                        currentNode.cachedZip = newCachedZip
+                        let cachedZip: CachedZip = CachedZip(zipPath: zipPath)
+                        zipCache[zipPath] = cachedZip
+                        currentNode.zipInfo = (cachedZip, subpath)
                     }
                 case .regular(_):
                     break
@@ -198,17 +207,35 @@ final class DependencyFSNode: FSItem, FSItemProtocol {
         return root
     }
 
+    private func getRootId(listableZip: ListableZip) throws -> ZipID {
+        let rootId =
+            try cachedRootId
+            ?? {
+                let rootId = try listableZip.getIdForPath(path: zipInfo!.subpath)
+                // cachedRootId = rootId // todo mutex?
+                return rootId
+            }()
+        return rootId
+    }
+
+    private func getZipChildren() throws -> [PathSegment: ZipID]? {
+        guard let cachedZip = cachedZip else {
+            return nil
+        }
+        let listableZip = try cachedZip.get()
+        return listableZip.getChildren(forId: try getRootId(listableZip: listableZip))
+    }
+
     func getChildren() throws -> [(FSFileName, FSItemProtocol)] {
         var children: [(FSFileName, FSItemProtocol)] = children.map {
             (FSFileName(string: $0.key), $0.value)
         }
 
-        if let cachedZip = cachedZip {
-            let zip = try cachedZip.get().getChildren(forId: ZipID.root)
-            children += zip.map {
+        if let zipChildren = try getZipChildren() {
+            children += zipChildren.map {
                 (
                     FSFileName(string: $0.key),
-                    ZipFSNode(cachedZip: cachedZip, zipId: $0.value, parentId: fileId)
+                    ZipFSNode(cachedZip: cachedZip!, zipId: $0.value, parentId: fileId)
                 )
             }
         }
@@ -222,12 +249,12 @@ final class DependencyFSNode: FSItem, FSItemProtocol {
         if let child = children[name] {
             return child
         }
-        if let cachedZip = cachedZip {
-            let zip = try cachedZip.get().getChildren(forId: ZipID.root)
-            if let zipEntry = zip[name] {
-                return ZipFSNode(cachedZip: cachedZip, zipId: zipEntry, parentId: fileId)
+        if let zipChildren = try getZipChildren() {
+            if let zipEntry = zipChildren[name] {
+                return ZipFSNode(cachedZip: cachedZip!, zipId: zipEntry, parentId: fileId)
             }
         }
+
         return nil
     }
 
@@ -247,7 +274,7 @@ final class DependencyFSNode: FSItem, FSItemProtocol {
 
 class CachedZip {
     private var rwlock: pthread_rwlock_t = pthread_rwlock_t()
-    var refCount : UInt32
+    var refCount: UInt32
     private enum ZipState {
         case notLoaded
         case loaded(ListableZip)
