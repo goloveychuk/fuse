@@ -1,5 +1,6 @@
 import FSKit
 import Foundation
+import Compression
 
 typealias PathSegment = String
 
@@ -130,7 +131,7 @@ final class ZipFSNode: FSItem, FSItemProtocol {
         case .dir(let listingId):
             return parentId.advance(by: listingId)
         case .file(let entryInd):
-            return parentId.advance(by: 10000 + entryInd) //todo
+            return parentId.advance(by: 10000 + entryInd)  //todo
         }
     }
 
@@ -141,11 +142,25 @@ final class ZipFSNode: FSItem, FSItemProtocol {
             let zipEntry = listableZip.getEntry(index: entryInd)
             switch zipEntry.compressionMethod {
             case .deflate:
-                break
+                throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)  //todo
+                // compression_decode_buffer(UnsafeMutablePointer<UInt8>, Int, UnsafePointer<UInt8>, Int, UnsafeMutableRawPointer?, compression_algorithm)
+
             case .store:
-                break
+                return try buffer.withUnsafeMutableBytes { rawBuffer in
+                    // let buffer = rawBuffer.bindMemory(to: UInt8.self)
+                    let bytesRead = try listableZip.readData(
+                        index: entryInd,
+                        offset: Int(offset),
+                        length: length,
+                        bufferPointer: rawBuffer,
+                    )
+                    if bytesRead > 0 { //todo
+                        return bytesRead
+                    } else {
+                        throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+                    }
+                }
             }
-            return 0
         case .dir(_):
             throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)  //not supported for dirs
         }

@@ -35,7 +35,7 @@ extension Data {
     // }
 }
 
-enum CompressionMethod:UInt16 {
+enum CompressionMethod: UInt16 {
     case store = 0
     case deflate = 8
 }
@@ -57,7 +57,7 @@ enum ZipID {
     case file(entryId: Int)
     case dir(listingId: Int)
     static var root: ZipID {
-        return .dir(listingId:0)
+        return .dir(listingId: 0)
     }
 }
 
@@ -87,7 +87,7 @@ extension Listings {
             let value = item.value
             result += String(repeating: "   ", count: depth) + "\(key):\n"
             if case .dir(let index) = value {
-                result += self.print(ind: index, depth: depth+1)
+                result += self.print(ind: index, depth: depth + 1)
             }
         }
         return result
@@ -105,13 +105,13 @@ class ListableZip {
     private static let END_OF_CENTRAL_DIRECTORY: UInt32 = 0x0605_4b50
 
     private let allEntries: [ZipEntry]
-
     private let listings: Listings
+    private let fileURL: URL
 
     func getIdForPath(path: String) throws -> ZipID {
         var currentId: ZipID = .root
         for part in path.split(separator: "/") {
-            if (part.isEmpty) {
+            if part.isEmpty {
                 continue
             }
             guard case .dir(let listingId) = currentId else {
@@ -128,16 +128,82 @@ class ListableZip {
 
     func getChildren(forId: ZipID) -> [PathSegment: ZipID] {
         guard case .dir(let index) = forId else {
-            return [:] //todo throw
+            return [:]  //todo throw
         }
         return listings[index]
     }
 
-    func getEntry(index: Int) ->  ZipEntry {
+    func getEntry(index: Int) -> ZipEntry {
         return allEntries[index]
     }
 
+    func readData(
+        index: Int, offset: Int, length: Int, bufferPointer: UnsafeMutableRawBufferPointer
+    ) throws -> Int {
+        let entry: ZipEntry = getEntry(index: index)
+
+        // Open the file where the zip is stored
+        let fileHandle = try FileHandle(forReadingFrom: fileURL)
+        defer {
+            try? fileHandle.close()
+        }
+
+        // Read local header
+        try fileHandle.seek(toOffset: UInt64(entry.localHeaderOffset))
+        guard let localHeaderBuf = try fileHandle.read(upToCount: 30) else {
+            throw ZipError.invalidZipFile("Could not read local header")
+        }
+
+        if localHeaderBuf.count < 30 {
+            throw ZipError.invalidZipFile("Incomplete local header")
+        }
+
+        // Parse header fields
+        let nameLength = localHeaderBuf.loadLittleEndian(26, as: UInt16.self)
+        let extraLength = localHeaderBuf.loadLittleEndian(28, as: UInt16.self)
+
+        // Calculate offset to compressed data
+        let dataOffset = entry.localHeaderOffset + 30 + UInt32(nameLength) + UInt32(extraLength)
+
+        // Validate offset
+        if offset < 0 || offset >= entry.compressedSize {
+            return 0
+        }
+
+        // Calculate how many bytes to read based on offset, length, and compressed size
+        let bytesToRead = min(length, Int(entry.compressedSize) - offset)
+        if bytesToRead <= 0 {
+            return 0
+        }
+
+        // Make sure the buffer has enough space
+        let bufferCapacity = min(bytesToRead, bufferPointer.count)
+        if bufferCapacity <= 0 {
+            return 0
+        }
+
+        // Seek to the correct position (data offset + requested offset)
+        try fileHandle.seek(toOffset: UInt64(dataOffset) + UInt64(offset))
+
+        let bytesRead = read(
+            fileHandle.fileDescriptor,
+            bufferPointer.baseAddress!,
+            bufferCapacity)
+
+        return bytesRead
+        // // Read directly into the provided buffer
+        // guard let readData = try fileHandle.read(upToCount: bufferCapacity) else {
+        //     return 0
+        // }
+
+        // // Copy read data to the buffer
+        // readData.copyBytes(to: bufferPointer)
+        // return readData.count
+
+    }
+
     init(fileURL: URL) throws {
+        self.fileURL = fileURL
         let entries = try ListableZip.readZipEntries(fileURL: fileURL)
         allEntries = entries
         var listings = Listings()
@@ -145,7 +211,7 @@ class ListableZip {
         var nameToIndMap: [String: Int] = [String: Int]()
 
         func addDirectory(parent: String) throws -> ZipID {
-            if (nameToIndMap[parent] != nil) {
+            if nameToIndMap[parent] != nil {
                 throw ZipError.invalidListing("Directory already exists")
             }
             let newIndex = ZipID.dir(listingId: listings.count)
@@ -167,13 +233,13 @@ class ListableZip {
             let isDir = entry.name.last == "/"
             var path = entry.name
             var zipID: ZipID
-            if (isDir) {
+            if isDir {
                 // todo check for dir
 
                 zipID = try addDirectory(parent: entry.name)
                 path = String(path.dropLast())
             } else {
-                zipID = ZipID.file(entryId: ind) //todo use other array, smaller
+                zipID = ZipID.file(entryId: ind)  //todo use other array, smaller
             }
             var (parent, name) = path.splitOnceFromRight(separator: "/")
             if name == nil {
@@ -293,7 +359,8 @@ class ListableZip {
                 throw ZipError.unsupportedZipFeature("Encrypted zip files are not supported")
             }
 
-            let compressionMethod = CompressionMethod(rawValue: cdBuffer.loadLittleEndian(offset + 10, as: UInt16.self))
+            let compressionMethod = CompressionMethod(
+                rawValue: cdBuffer.loadLittleEndian(offset + 10, as: UInt16.self))
             guard let compressionMethod = compressionMethod else {
                 throw ZipError.invalidZipFile("Not supported zip compression")
             }
@@ -321,8 +388,8 @@ class ListableZip {
 
             let isSymbolicLink =
                 os == ZIP_UNIX && ((UInt16(externalAttributes >> 16)) & S_IFMT) == S_IFLNK  //todo check UInt16()
-            
-            //todo check 
+
+            //todo check
             // let isDir =
             //     os == ZIP_UNIX && ((UInt16(externalAttributes >> 16)) & S_IFMT) == S_IFDIR  //todo check UInt16()
 
