@@ -4,32 +4,6 @@ import Foundation
 
 typealias PathSegment = String
 
-// PortablePath enum to handle paths inside and outside of zip archives
-enum PortablePath: Decodable {
-    case regular(path: String)
-    case zipped(zipPath: String, innerPath: String)
-
-    init(from string: String) {
-        if let zipRange = string.range(of: ".zip") {
-            let zipPath = String(string[..<zipRange.upperBound])
-            var innerPath = String(string[zipRange.upperBound...])
-            if innerPath == "" {
-                innerPath = "/"
-            }
-            self = .zipped(zipPath: zipPath, innerPath: innerPath)
-        } else {
-            self = .regular(path: string)
-        }
-    }
-
-    // Encoding and decoding implementation
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        let string = try container.decode(String.self)
-        self.init(from: string)
-    }
-}
-
 // Define the LinkType enum
 enum LinkType: String, Decodable {
     case HARD
@@ -47,22 +21,68 @@ enum MyError: Error {
         }
     }
 }
-// Define the LocationNode structure
-struct DependencyNode: Decodable {
-    var children: [PathSegment: DependencyNode]
-    var linkType: LinkType
-    var target: PortablePath?
+
+// Typealias for zip information
+typealias ZipPathInfo = (zipPath: String, subpath: String)
+
+// Define the DependencyNode enum
+enum DependencyNode: Decodable {
+    case softLink(target: String)
+    case zip(zipInfo: ZipPathInfo, children: [PathSegment: DependencyNode])
+    case dirPortal(target: String, children: [PathSegment: DependencyNode])
+
+    // Implement Decodable protocol
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        let linkType = try container.decode(LinkType.self, forKey: .linkType)
+        let target = try container.decodeIfPresent(String.self, forKey: .target)
+
+        switch linkType {
+        case .SOFT:
+            guard let targetPath = target else {
+                throw MyError.badManifest("Soft link requires a target")
+            }
+            self = .softLink(target: targetPath)
+
+        case .HARD:
+            guard let targetPath = target else {
+                throw MyError.badManifest("Hard link requires a target")
+            }
+            let children = try container.decode(
+                [PathSegment: DependencyNode].self, forKey: .children)
+
+            // Validate children paths
+            for (key, _) in children {
+                guard !key.contains("/") && !key.contains(".") else {
+                    throw MyError.badManifest("PathSegment cannot contain '/' or '.'")
+                }
+            }
+
+            // Check if the target has a .zip extension
+            if let zipRange = targetPath.range(of: ".zip") {
+                let zipPath = String(targetPath[..<zipRange.upperBound])
+                var subpath = String(targetPath[zipRange.upperBound...])
+                if subpath.isEmpty {
+                    subpath = "/"
+                }
+                self = .zip(zipInfo: (zipPath: zipPath, subpath: subpath), children: children)
+            } else {
+                self = .dirPortal(target: targetPath, children: children)
+            }
+        }
+    }
 
     // Deserialize from JSON data
     static func fromJSONData(_ data: Data) throws -> DependencyNode {
         let decoder = JSONDecoder()
-        let val = try decoder.decode(DependencyNode.self, from: data)
-        for (key, _) in val.children {
-            guard !key.contains("/") && !key.contains(".") else {
-                throw MyError.badManifest("PathSegment cannot contain '/' or '.'")
-            }
-        }
-        return val
+        return try decoder.decode(DependencyNode.self, from: data)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case children
+        case linkType
+        case target
     }
 }
 
@@ -135,6 +155,18 @@ final class ZipFSNode: FSItem, FSItemProtocol {
         case .file(let entryInd):
             return parentId.advance(by: 10000 + entryInd)  //todo
         }
+    }
+
+    func readSymbolicLink() throws -> FSFileName {
+        let listableZip = try self.cachedZip.get()
+        guard case .file(let entryInd) = zipId else {
+            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        }
+        let zipEntry = listableZip.getEntry(index: entryInd)
+        guard zipEntry.isSymbolicLink else {
+            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        }
+        return FSFileName(string: zipEntry.name)
     }
 
     func readData(offset: off_t, length: Int, into buffer: FSMutableFileDataBuffer) throws -> Int {
@@ -214,17 +246,22 @@ class BaseDependencyFSNode: FSItem {
         self.parentId = parentId
     }
 
-    static func create(dependencyNode: DependencyNode, fileId: FSItem.Identifier, parentId: FSItem.Identifier) -> BaseDependencyFSNode2 {
-        switch dependencyNode.linkType {
-            case .HARD:
-                let node = HardDependencyFSNode(
-                    dependencyNode: dependencyNode, fileId: fileId, parentId: parentId)
-
-                return node
-            
-            case .SOFT:
-                let node = SoftDependencyFSNode(dependencyNode: dependencyNode, fileId: fileId, parentId: parentId)
-                return node
+    static func create(
+        dependencyNode: DependencyNode, fileId: FSItem.Identifier, parentId: FSItem.Identifier
+    ) -> BaseDependencyFSNode2 {
+        switch dependencyNode {
+        case .softLink(_):
+            let node = SoftDependencyFSNode(
+                dependencyNode: dependencyNode, fileId: fileId, parentId: parentId)
+            return node
+        case .zip(_, _):
+            let node = HardDependencyFSNode(
+                dependencyNode: dependencyNode, fileId: fileId, parentId: parentId)
+            return node
+        case .dirPortal(_, _):
+            let node = HardDependencyFSNode(
+                dependencyNode: dependencyNode, fileId: fileId, parentId: parentId)
+            return node
         }
     }
 
@@ -238,25 +275,20 @@ class BaseDependencyFSNode: FSItem {
         var toVisit = [root]
         while !toVisit.isEmpty {
             let currentNode = toVisit.removeFirst()
-            if let target = currentNode.dependencyNode.target {
-                switch currentNode.dependencyNode.linkType {
-                case .HARD:
-                    switch target {
-                    case .zipped(let zipPath, let subpath):
-                        if let cachedZip = zipCache[zipPath] {
-                            currentNode.zipInfo = (cachedZip, subpath)
-                            cachedZip.refCount += 1
-                        } else {
-                            let cachedZip: CachedZip = CachedZip(zipPath: zipPath)
-                            zipCache[zipPath] = cachedZip
-                            currentNode.zipInfo = (cachedZip, subpath)
-                        }
-                    case .regular(_):
-                        break  //todo impl
-                    }
-                case .SOFT:
-                    break
+            switch currentNode.dependencyNode {
+            case .softLink(_):
+                break
+            case .zip(let zipInfo, _):
+                if let cachedZip = zipCache[zipInfo.zipPath] {
+                    currentNode.zipInfo = (cachedZip, zipInfo.subpath)
+                    cachedZip.refCount += 1
+                } else {
+                    let cachedZip: CachedZip = CachedZip(zipPath: zipInfo.zipPath)
+                    zipCache[zipInfo.zipPath] = cachedZip
+                    currentNode.zipInfo = (cachedZip, zipInfo.subpath)
                 }
+            case .dirPortal(_, _):
+                break
             }
             for (name, childNode) in currentNode.dependencyNode.children {
                 let child = BaseDependencyFSNode.create(
@@ -297,7 +329,10 @@ final class SoftDependencyFSNode: BaseDependencyFSNode, FSItemProtocol {
         throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)  //not supported for symlinks
     }
     func readSymbolicLink() throws -> FSFileName {
-        return FSFileName(string: dependencyNode.target?.path ?? "")!
+        guard case .softLink(let target) = dependencyNode else {
+            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        }
+        return FSFileName(string: target)
     }
 }
 
@@ -305,7 +340,6 @@ final class HardDependencyFSNode: BaseDependencyFSNode, FSItemProtocol {
 
     private var zipInfo: ZipInfo? = nil
     private var cachedRootId: ZipID?
-    
 
     private var cachedZip: CachedZip? {
         return zipInfo?.cachedZip
