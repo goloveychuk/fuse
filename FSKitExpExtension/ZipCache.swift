@@ -71,6 +71,23 @@ protocol FSItemProtocol: FSItem {
     func getChild(name: FSFileName) throws -> FSItemProtocol?
 
     func getAttributes() throws -> FSItem.Attributes
+
+    func readData(offset: off_t, length: Int, into buffer: FSMutableFileDataBuffer) throws -> Int
+}
+
+extension FSItem.Identifier {
+    @inline(__always)
+    static func create(val: UInt64) -> FSItem.Identifier {
+        return FSItem.Identifier(rawValue: val)!
+    }
+    @inline(__always)
+    func advance(by: UInt64) -> FSItem.Identifier {
+        return FSItem.Identifier.create(val: self.rawValue + by)
+    }
+    @inline(__always)
+    func advance(by: Int) -> FSItem.Identifier {
+        return advance(by: UInt64(by))
+    }
 }
 
 private let uid = getuid()
@@ -96,7 +113,6 @@ final class ZipFSNode: FSItem, FSItemProtocol {
             )
         }
     }
-
     func getChild(name: FSFileName) throws -> FSItemProtocol? {
         let zip = try cachedZip.get()
         let zipEntries = zip.getChildren(forId: zipId)
@@ -112,9 +128,26 @@ final class ZipFSNode: FSItem, FSItemProtocol {
     func getFsId() -> FSItem.Identifier {
         switch zipId {
         case .dir(let listingId):
-            return FSItem.Identifier(rawValue: parentId.rawValue + UInt64(listingId))!
+            return parentId.advance(by: listingId)
         case .file(let entryInd):
-            return FSItem.Identifier(rawValue: 10000 + parentId.rawValue + UInt64(entryInd))!  //todo
+            return parentId.advance(by: 10000 + entryInd) //todo
+        }
+    }
+
+    func readData(offset: off_t, length: Int, into buffer: FSMutableFileDataBuffer) throws -> Int {
+        switch zipId {
+        case .file(let entryInd):
+            let listableZip = try self.cachedZip.get()
+            let zipEntry = listableZip.getEntry(index: entryInd)
+            switch zipEntry.compressionMethod {
+            case .deflate:
+                break
+            case .store:
+                break
+            }
+            return 0
+        case .dir(_):
+            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)  //not supported for dirs
         }
     }
 
@@ -174,7 +207,7 @@ final class DependencyFSNode: FSItem, FSItemProtocol {
 
     static func buildTree(from node: DependencyNode) -> DependencyFSNode {
         var zipCache = [PathSegment: CachedZip]()
-        var prevId = FSItem.Identifier(rawValue: IdStep)!
+        var prevId = FSItem.Identifier.create(val: IdStep)
 
         let root = DependencyFSNode(
             dependencyNode: node, fileId: .rootDirectory, parentId: .parentOfRoot)
@@ -199,7 +232,7 @@ final class DependencyFSNode: FSItem, FSItemProtocol {
             for (name, childNode) in currentNode.dependencyNode.children {
                 let child = DependencyFSNode(
                     dependencyNode: childNode, fileId: prevId, parentId: currentNode.fileId)
-                prevId = FSItem.Identifier(rawValue: prevId.rawValue + IdStep)!  //todo reuse id for same zip
+                prevId = prevId.advance(by: IdStep)  //todo reuse id for same zip
                 currentNode.children[name] = child
                 toVisit.append(child)
             }
@@ -212,7 +245,7 @@ final class DependencyFSNode: FSItem, FSItemProtocol {
             try cachedRootId
             ?? {
                 let rootId = try listableZip.getIdForPath(path: zipInfo!.subpath)
-                cachedRootId = rootId // todo mutex?
+                cachedRootId = rootId  // todo mutex?
                 return rootId
             }()
         return rootId
@@ -240,6 +273,10 @@ final class DependencyFSNode: FSItem, FSItemProtocol {
             }
         }
         return children
+    }
+
+    func readData(offset: off_t, length: Int, into buffer: FSMutableFileDataBuffer) throws -> Int {
+        throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)  //not supported for dirs
     }
 
     func getChild(name: FSFileName) throws -> FSItemProtocol? {

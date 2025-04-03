@@ -35,9 +35,14 @@ extension Data {
     // }
 }
 
+enum CompressionMethod:UInt16 {
+    case store = 0
+    case deflate = 8
+}
+
 struct ZipEntry {  //todo minimal
     let name: String
-    let compressionMethod: UInt16
+    let compressionMethod: CompressionMethod
     let size: UInt32
     let os: UInt8
     let isSymbolicLink: Bool
@@ -288,7 +293,10 @@ class ListableZip {
                 throw ZipError.unsupportedZipFeature("Encrypted zip files are not supported")
             }
 
-            let compressionMethod = cdBuffer.loadLittleEndian(offset + 10, as: UInt16.self)
+            let compressionMethod = CompressionMethod(rawValue: cdBuffer.loadLittleEndian(offset + 10, as: UInt16.self))
+            guard let compressionMethod = compressionMethod else {
+                throw ZipError.invalidZipFile("Not supported zip compression")
+            }
             let crc = cdBuffer.loadLittleEndian(offset + 16, as: UInt32.self)
             let compressedSize = cdBuffer.loadLittleEndian(offset + 20, as: UInt32.self)
             let size = cdBuffer.loadLittleEndian(offset + 24, as: UInt32.self)

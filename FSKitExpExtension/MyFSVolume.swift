@@ -411,41 +411,43 @@ extension MyFSVolume: FSVolume.Operations {
 //     }
 // }
 
-// extension MyFSVolume: FSVolume.ReadWriteOperations {
+extension MyFSVolume: FSVolume.ReadWriteOperations {
 
-//     func read(
-//         from item: FSItem, at offset: off_t, length: Int, into buffer: FSMutableFileDataBuffer
-//     ) async throws -> Int {
-//         logger.debug("read: \(item)")
+    func read(
+        from item: FSItem, at offset: off_t, length: Int, into buffer: FSMutableFileDataBuffer
+    ) async throws -> Int {
+        logger.debug("read: \(item)")
 
-//         var bytesRead = 0
 
-//         if let item = item as? FSItemProtocol, let data = item.data {
-//             bytesRead = data.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) in
-//                 let length = min(buffer.length, data.count)
-//                 _ = buffer.withUnsafeMutableBytes { dst in
-//                     memcpy(dst.baseAddress, ptr.baseAddress, length)
-//                 }
-//                 return length
-//             }
-//         }
+        guard let item = item as? FSItemProtocol else {
+            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        }
+        var bytesRead = 0
 
-//         return bytesRead
-//     }
+        return try item.readData(offset: offset, length: length, into: buffer)
+            // bytesRead = data.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) in
+            //     let length = min(buffer.length, data.count)
+            //     _ = buffer.withUnsafeMutableBytes { dst in
+            //         memcpy(dst.baseAddress, ptr.baseAddress, length)
+            //     }
+            //     return length
+            // }
+    }
 
-//     func write(contents: Data, to item: FSItem, at offset: off_t) async throws -> Int {
-//         logger.debug("write: \(item) - \(offset)")
+    func write(contents: Data, to item: FSItem, at offset: off_t) async throws -> Int {
+        throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        // logger.debug("write: \(item) - \(offset)")
 
-//         if let item = item as? FSItemProtocol {
-//             logger.debug("- write: \(item.name)")
-//             item.data = contents
-//             item.attributes.size = UInt64(contents.count)
-//             item.attributes.allocSize = UInt64(contents.count)
-//         }
+        // if let item = item as? FSItemProtocol {
+        //     logger.debug("- write: \(item.name)")
+        //     item.data = contents
+        //     item.attributes.size = UInt64(contents.count)
+        //     item.attributes.allocSize = UInt64(contents.count)
+        // }
 
-//         return contents.count
-//     }
-// }
+        // return contents.count
+    }
+}
 
 // extension MyFSVolume: FSVolume.XattrOperations {
 
