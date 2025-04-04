@@ -101,7 +101,7 @@ extension MyFSVolume: FSVolume.Operations {
                             "/Users/vadymh/Library/Containers/app.badim.FSKitExpExtension/data/deptree.json"
                     ))
                 let depTree = try DependencyNode.fromJSONData(data)
-                let depFsNode = BaseDependencyFSNode.buildTree(from: depTree)
+                let depFsNode = DependencyFSNodeCreator().buildTree(from: depTree)
                 return depFsNode
             }()
             return root
