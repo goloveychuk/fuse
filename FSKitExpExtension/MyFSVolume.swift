@@ -282,7 +282,7 @@ extension MyFSVolume: FSVolume.Operations {
         _ directory: FSItem,
         startingAt cookie: FSDirectoryCookie,
         verifier: FSDirectoryVerifier,
-        attributes: FSItem.GetAttributesRequest?,
+        attributes req: FSItem.GetAttributesRequest?,
         packer: FSDirectoryEntryPacker
     ) async throws -> FSDirectoryVerifier {
         logger.debug("enumerateDirectory: \(directory)")
@@ -297,16 +297,17 @@ extension MyFSVolume: FSVolume.Operations {
                 idx += 1
                 continue
             }
-            let attrs = try item.getAttributes()
+            let attributes =  req != nil ? try item.getAttributes() : nil //todo requested attributes?
             let ok = packer.packEntry(
                 name: name,
-                itemType: attrs.type,
-                itemID: attrs.fileID,
+                itemType: item.itemType,
+                itemID: item.fileId,
                 nextCookie: FSDirectoryCookie(UInt64(idx+1)),
-                attributes: attributes != nil ? attrs : nil
+                attributes: attributes,
             )
+            
             if (!ok)  {
-                // we stop iterating
+                // fskit dont't want to continue
                 break
             }
             idx += 1
@@ -426,7 +427,7 @@ extension MyFSVolume: FSVolume.ReadWriteOperations {
         guard let item = item as? FSItemProtocol else {
             throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
         }
-        var bytesRead = 0
+        // var bytesRead = 0
 
         return try item.readData(offset: offset, length: length, into: buffer)
             // bytesRead = data.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) in

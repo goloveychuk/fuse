@@ -55,6 +55,7 @@ struct ZipEntry {  //todo minimal
 
 enum ZipID {
     case file(entryId: Int)
+    case symlink(entryId: Int)
     case dir(listingId: Int)
     static var root: ZipID {
         return .dir(listingId: 0)
@@ -239,7 +240,11 @@ class ListableZip {
                 zipID = try addDirectory(parent: entry.name)
                 path = String(path.dropLast())
             } else {
-                zipID = ZipID.file(entryId: ind)  //todo use other array, smaller
+                if entry.isSymbolicLink {
+                    zipID = ZipID.symlink(entryId: ind)
+                } else {
+                    zipID = ZipID.file(entryId: ind)
+                }
             }
             var (parent, name) = path.splitOnceFromRight(separator: "/")
             if name == nil {
