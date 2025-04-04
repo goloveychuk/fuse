@@ -292,6 +292,11 @@ extension MyFSVolume: FSVolume.Operations {
         attributes req: FSItem.GetAttributesRequest?,
         packer: FSDirectoryEntryPacker
     ) async throws -> FSDirectoryVerifier {
+        let data = try? Data(
+                    contentsOf: URL(
+                        filePath:
+                            "/Users/vadymh/github/yarn-plugin-fuse/example/.yarn/fuse-state.json"
+                    ))
         logger.debug("enumerateDirectory: \(directory)")
 
         guard let directory = directory as? FSItemProtocol else {
