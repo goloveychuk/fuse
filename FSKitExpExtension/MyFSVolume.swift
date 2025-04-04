@@ -12,9 +12,10 @@ import os
 final class MyFSVolume: FSVolume {
 
     private let resource: FSResource
-
+    var urls : [URL?]?
     private var depTree: DependencyNode?
     var mount3: FSTaskOptions? = nil
+    var mount2: FSTaskOptions? = nil
 
     private let logger = Logger(subsystem: "FSKitExp", category: "MyFSVolume")
 
@@ -91,6 +92,11 @@ extension MyFSVolume: FSVolume.Operations {
 
     func activate(options: FSTaskOptions) async throws -> FSItem {
         self.mount3 = options
+        self.urls = [
+         mount3!.url(forOption: "m"),
+         mount3!.url(forOption: "g")
+        ]
+
         logger.debug("activate")
 
         do {
@@ -130,6 +136,7 @@ extension MyFSVolume: FSVolume.Operations {
     }
 
     func mount(options: FSTaskOptions) async throws {
+        self.mount2 = options
         logger.debug("mount")
     }
 
@@ -305,7 +312,7 @@ extension MyFSVolume: FSVolume.Operations {
                 nextCookie: FSDirectoryCookie(UInt64(idx+1)),
                 attributes: attributes,
             )
-            
+
             if (!ok)  {
                 // fskit dont't want to continue
                 break

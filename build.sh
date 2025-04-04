@@ -8,7 +8,10 @@
 # kill -9 $!
 
 umount /tmp/TestVol || true
-mount -F -t MyFS -o asdf=./fsdfsd -v  /dev/disk5 /tmp/TestVol
+# -v verbose
+# -F - force fskit
+# 
+mount -F -t MyFS -o -m=./build.sh,-g=./  /dev/disk5 /tmp/TestVol
 biggest_pid=$(pgrep FSKitExpExtension | sort -n | tail -1 | tr -d ' ')
 echo "FSKIT PID: $biggest_pid"
 echo $biggest_pid | pbcopy
