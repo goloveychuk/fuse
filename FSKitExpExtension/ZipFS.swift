@@ -329,7 +329,7 @@ class ListableZip {
             throw ZipError.zipArchiveInconsistent
         }
 
-        if totalEntries > UInt16(centralDirSize / 46) {
+        if UInt32(totalEntries) > centralDirSize / 46 {
             throw ZipError.zipArchiveInconsistent
         }
 
