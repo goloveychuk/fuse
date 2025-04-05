@@ -189,10 +189,10 @@ final class ZipFSNode: FSItem, FSItemProtocol {
             throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
         }
         let zipEntry = listableZip.getEntry(index: entryInd)
-        guard zipEntry.isSymbolicLink else {
+        guard let symlinkName = zipEntry.symlinkName else {
             throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
         }
-        return FSFileName(string: zipEntry.name)
+        return FSFileName(string: symlinkName)
     }
 
     func readData(offset: off_t, length: Int, into buffer: FSMutableFileDataBuffer) throws -> Int {

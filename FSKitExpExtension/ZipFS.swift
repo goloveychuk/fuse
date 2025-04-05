@@ -35,9 +35,19 @@ extension Data {
     // }
 }
 
-enum CompressionMethod: UInt16 {
-    case store = 0
-    case deflate = 8
+enum CompressionMethod {
+    case store
+    case deflate
+    init?(rawValue: UInt16) {
+        switch rawValue {
+        case 0:
+            self = .store
+        case 8:
+            self = .deflate
+        default:
+            return nil
+        }
+    }
 }
 
 struct ZipEntry {  //todo minimal
@@ -95,6 +105,15 @@ extension Listings {
     }
 }
 
+struct MinEntry {
+    let localHeaderOffset: UInt32
+    let compressedSize: UInt32
+    let size: UInt32
+    // let isSymbolicLink: Bool
+    let compressionMethod: CompressionMethod
+    let symlinkName: String?  //only for symlink
+}
+
 class ListableZip {
 
     private static let SAFE_TIME: Date = Date(timeIntervalSince1970: 456_789_000)
@@ -105,7 +124,7 @@ class ListableZip {
     private static let CENTRAL_DIRECTORY: UInt32 = 0x0201_4b50
     private static let END_OF_CENTRAL_DIRECTORY: UInt32 = 0x0605_4b50
 
-    private let allEntries: [ZipEntry]
+    private var allEntries: [MinEntry] = []
     private let listings: Listings
     private let fileURL: URL
 
@@ -134,14 +153,14 @@ class ListableZip {
         return listings[index]
     }
 
-    func getEntry(index: Int) -> ZipEntry {
+    func getEntry(index: Int) -> MinEntry {
         return allEntries[index]
     }
 
     func readData(
         index: Int, offset: Int, length: Int, bufferPointer: UnsafeMutableRawBufferPointer
     ) throws -> Int {
-        let entry: ZipEntry = getEntry(index: index)
+        let entry = getEntry(index: index)
 
         // Open the file where the zip is stored
         let fileHandle = try FileHandle(forReadingFrom: fileURL)
@@ -206,7 +225,6 @@ class ListableZip {
     init(fileURL: URL) throws {
         self.fileURL = fileURL
         let entries = try ListableZip.readZipEntries(fileURL: fileURL)
-        allEntries = entries
         var listings = Listings()
 
         var nameToIndMap: [String: Int] = [String: Int]()
@@ -230,16 +248,23 @@ class ListableZip {
 
         _ = try addDirectory(parent: "/")
 
-        for (ind, entry) in entries.enumerated() {
+        for entry in entries {
             let isDir = entry.name.last == "/"
             var path = entry.name
             var zipID: ZipID
             if isDir {
-                // todo check for dir
-
                 zipID = try addDirectory(parent: entry.name)
                 path = String(path.dropLast())
             } else {
+                let ind = allEntries.count
+                allEntries.append(
+                    MinEntry(
+                        localHeaderOffset: entry.localHeaderOffset,
+                        compressedSize: entry.compressedSize,
+                        size: entry.size,
+                        compressionMethod: entry.compressionMethod,
+                        symlinkName: entry.isSymbolicLink ? entry.name : nil))
+
                 if entry.isSymbolicLink {
                     zipID = ZipID.symlink(entryId: ind)
                 } else {
