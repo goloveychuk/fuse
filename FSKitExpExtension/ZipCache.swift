@@ -13,12 +13,16 @@ enum LinkType: String, Decodable {
 // Define custom errors for dependency operations
 enum MyError: Error {
     case badManifest(String)
+    case badMountParams
 
     var localizedDescription: String {
         switch self {
         case .badManifest(let err):
             return "Bad manifest: \(err)"
+        case .badMountParams:
+            return "Bad mount parameters"
         }
+
     }
 }
 
@@ -33,6 +37,7 @@ enum DependencyNode: Decodable {
     case softLink(data: SoftLinkData)
     case zip(zipInfo: ZipPathInfo, children: Children)
     case dirPortal(target: String, children: Children)
+    case nestedDir(children: Children)
 
     // Implement Decodable protocol
     init(from decoder: Decoder) throws {
@@ -49,30 +54,34 @@ enum DependencyNode: Decodable {
             self = .softLink(data: targetPath)
 
         case .HARD:
-            guard let targetPath = target else {
-                throw MyError.badManifest("Hard link requires a target")
-            }
+
             let children = try container.decode(
                 Children.self, forKey: .children)
 
             // Validate children paths
             for (key, _) in children {
-                guard !key.contains("/") && !key.contains(".") else {
+                guard !key.contains("/") else {
                     throw MyError.badManifest("PathSegment cannot contain '/' or '.'")
                 }
             }
 
-            // Check if the target has a .zip extension
-            if let zipRange = targetPath.range(of: ".zip") {
-                let zipPath = String(targetPath[..<zipRange.upperBound])
-                var subpath = String(targetPath[zipRange.upperBound...])
-                if subpath.isEmpty {
-                    subpath = "/"
+            if let targetPath = target {
+                if let zipRange = targetPath.range(of: ".zip") {
+                    let zipPath = String(targetPath[..<zipRange.upperBound])
+                    var subpath = String(targetPath[zipRange.upperBound...])
+                    if subpath.isEmpty {
+                        subpath = "/"
+                    }
+                    self = .zip(zipInfo: (zipPath: zipPath, subpath: subpath), children: children)
+                } else {
+                    self = .dirPortal(target: targetPath, children: children)
                 }
-                self = .zip(zipInfo: (zipPath: zipPath, subpath: subpath), children: children)
             } else {
-                self = .dirPortal(target: targetPath, children: children)
+                self = .nestedDir(children: children)
             }
+
+        // Check if the target has a .zip extension
+
         }
     }
 
@@ -134,7 +143,7 @@ final class ZipFSNode: FSItem, FSItemProtocol {
             return .symlink
         case .dir:
             return .directory
-        case .file(_):            
+        case .file(_):
             return .file
         }
     }
@@ -281,7 +290,7 @@ final class DependencyFSNodeCreator {
                 children: createChildren(parentId: fileId, children: children), zipInfo: zipInfo)
             return node
 
-        case .dirPortal(_, let children):  //todo impl
+        case .dirPortal(_, let children), .nestedDir(let children):  //todo impl
             let node = HardDependencyFSNode(
                 fileId: fileId, parentId: parentId,
                 children: createChildren(parentId: fileId, children: children))

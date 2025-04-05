@@ -12,7 +12,7 @@ import os
 final class MyFSVolume: FSVolume {
 
     private let resource: FSResource
-    var urls : [URL?]?
+    var urls: [URL?]?
     private var depTree: DependencyNode?
     var mount3: FSTaskOptions? = nil
     var mount2: FSTaskOptions? = nil
@@ -65,7 +65,7 @@ extension MyFSVolume: FSVolume.Operations {
         capabilities.supportsHardLinks = true
         capabilities.supportsSymbolicLinks = true
         capabilities.supportsPersistentObjectIDs = true
-        capabilities.supportsHiddenFiles = true //??
+        capabilities.supportsHiddenFiles = true  //??
         capabilities.supports64BitObjectIDs = true
         capabilities.caseFormat = .insensitiveCasePreserving
 
@@ -92,20 +92,26 @@ extension MyFSVolume: FSVolume.Operations {
 
     func activate(options: FSTaskOptions) async throws -> FSItem {
         self.mount3 = options
-        self.urls = [
-         mount3!.url(forOption: "m"),
-         mount3!.url(forOption: "g")
-        ]
+        var path: String? = nil
+        var optionsIter = options.taskOptions.makeIterator()
+        while let option = optionsIter.next() {
+            switch option {
+            case "-m":
+                path = optionsIter.next()
+            default:
+                throw MyError.badMountParams
+            }
+        }
+
+        guard let path = path else {
+            throw MyError.badMountParams
+        }
 
         logger.debug("activate")
 
         do {
             let root = try {
-                let data = try Data(
-                    contentsOf: URL(
-                        filePath:
-                            "/Users/vadymh/Library/Containers/app.badim.FSKitExpExtension/data/deptree.json"
-                    ))
+                let data = try Data(contentsOf: URL(filePath: path))
                 let depTree = try DependencyNode.fromJSONData(data)
                 let depFsNode = DependencyFSNodeCreator().buildTree(from: depTree)
                 return depFsNode
@@ -116,19 +122,6 @@ extension MyFSVolume: FSVolume.Operations {
             logger.error("Error mounting: \(error)")
             throw error
         }
-        // let root: MyFSItem = {
-        //     let item = MyFSItem(name: FSFileName(string: "/"))
-        //     item.attributes.parentID = .parentOfRoot
-        //     item.attributes.fileID = .rootDirectory
-        //     item.attributes.uid = uid
-        //     item.attributes.gid = gid
-        //     item.attributes.linkCount = 1
-        //     item.attributes.type = .directory
-        //     item.attributes.mode = UInt32(S_IFDIR | 0b111_000_000)
-        //     item.attributes.allocSize = 1
-        //     item.attributes.size = 1
-        //     return item
-        // }()
     }
 
     func deactivate(options: FSDeactivateOptions = []) async throws {
@@ -152,8 +145,8 @@ extension MyFSVolume: FSVolume.Operations {
         _ desiredAttributes: FSItem.GetAttributesRequest,
         of item: FSItem
     ) async throws -> FSItem.Attributes {
+    
         if let item = item as? FSItemProtocol {
-            // logger.debug("getItemAttributes1: \(item.name), \(desiredAttributes)")
             return try item.getAttributes()
         } else {
             logger.debug("getItemAttributes2: \(item), \(desiredAttributes)")
@@ -165,15 +158,11 @@ extension MyFSVolume: FSVolume.Operations {
         _ newAttributes: FSItem.SetAttributesRequest,
         on item: FSItem
     ) async throws -> FSItem.Attributes {
-        throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        guard let item = item as? WriteFSItemProtocol else {
+            throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
+        }
 
-        // logger.debug("setItemAttributes: \(item), \(newAttributes)")
-        // if let item = item as? FSItemProtocol {
-        //     mergeAttributes(item.attributes, request: newAttributes)
-        //     return item.attributes
-        // } else {
-        //     throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
-        // }
+        return try item.setAttributes(newAttributes: newAttributes)
     }
 
     func lookupItem(
@@ -213,19 +202,14 @@ extension MyFSVolume: FSVolume.Operations {
         inDirectory directory: FSItem,
         attributes newAttributes: FSItem.SetAttributesRequest
     ) async throws -> (FSItem, FSFileName) {
-        throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
-
-        // logger.debug("createItem: \(String(describing: name.string)) - \(newAttributes.mode)")
-        // guard let directory = directory as? FSItemProtocol else {
-        //     throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
-        // }
-        // let item = MyFSItem(name: name)
-        // mergeAttributes(item.attributes, request: newAttributes)
-        // item.attributes.parentID = directory.attributes.fileID
-        // item.attributes.type = type
-        // directory.addItem(item)
-
-        // return (item, name)
+        guard let directory = directory as? WriteFSItemProtocol else {
+            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        }
+        return try directory.createItem(
+            named: name,
+            type: type,
+            attributes: newAttributes
+        )
     }
 
     func createSymbolicLink(
@@ -234,21 +218,14 @@ extension MyFSVolume: FSVolume.Operations {
         attributes newAttributes: FSItem.SetAttributesRequest,
         linkContents contents: FSFileName
     ) async throws -> (FSItem, FSFileName) {
-        // let data = try Data(
-        //     contentsOf: URL(
-        //         filePath:
-        //             "/Users/vadymh/Library/Containers/app.badim.FSKitExpExtension/data/deptree.json"
-        //     ))
-
-        // do {
-        //     let json = try DependencyNode.fromJSONData(data)
-        // } catch {
-        //     logger.debug("Error parsing JSON: \(error)")
-        // }
-        // let depTree = try DependencyNode.fromJSONData(data)
-        // let depFsNode = DependencyFSNode.buildTree(from: depTree)
-        logger.debug("createSymbolicLink: \(name)")
-        throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        guard let directory = directory as? WriteFSItemProtocol else {
+            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        }
+        return try directory.createSymbolicLink(
+            named: name,
+            attributes: newAttributes,
+            linkContents: contents
+        )
     }
 
     func createLink(
@@ -256,8 +233,10 @@ extension MyFSVolume: FSVolume.Operations {
         named name: FSFileName,
         inDirectory directory: FSItem
     ) async throws -> FSFileName {
-        logger.debug("createLink: \(name)")
-        throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        guard let item = item as? WriteFSItemProtocol else {  //todo rm hardlink support?
+            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        }
+        return try item.createLink(to: name, inDirectory: directory)
     }
 
     func removeItem(
@@ -265,12 +244,10 @@ extension MyFSVolume: FSVolume.Operations {
         named name: FSFileName,
         fromDirectory directory: FSItem
     ) async throws {
-        logger.debug("remove: \(name)")
-        // if let item = item as? FSItemProtocol, let directory = directory as? FSItemProtocol {
-        //     directory.removeItem(item)
-        // } else {
-        //     throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
-        // }
+        guard let item = item as? WriteFSItemProtocol else {
+            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        }
+        return try item.removeItem(name: name, fromDirectory: directory)
     }
 
     func renameItem(
@@ -281,8 +258,16 @@ extension MyFSVolume: FSVolume.Operations {
         inDirectory destinationDirectory: FSItem,
         overItem: FSItem?
     ) async throws -> FSFileName {
-        logger.debug("rename: \(item)")
-        throw fs_errorForPOSIXError(POSIXError.ENOTSUP.rawValue)
+        guard let item = item as? WriteFSItemProtocol else {
+            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        }
+        return try item.renameItem(
+            inDirectory: sourceDirectory,
+            named: sourceName,
+            to: destinationName,
+            inDirectory: destinationDirectory,
+            overItem: overItem
+        )
     }
 
     func enumerateDirectory(
@@ -292,12 +277,6 @@ extension MyFSVolume: FSVolume.Operations {
         attributes req: FSItem.GetAttributesRequest?,
         packer: FSDirectoryEntryPacker
     ) async throws -> FSDirectoryVerifier {
-        let data = try? Data(
-                    contentsOf: URL(
-                        filePath:
-                            "/Users/vadymh/github/yarn-plugin-fuse/example/.yarn/fuse-state.json"
-                    ))
-        logger.debug("enumerateDirectory: \(directory)")
 
         guard let directory = directory as? FSItemProtocol else {
             throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
@@ -305,107 +284,27 @@ extension MyFSVolume: FSVolume.Operations {
 
         var idx = 0
         for (name, item) in try directory.getChildren() {
-            if (idx < cookie.rawValue) {
+            if idx < cookie.rawValue {
                 idx += 1
                 continue
             }
-            let attributes =  req != nil ? try item.getAttributes() : nil //todo requested attributes?
+            let attributes = req != nil ? try item.getAttributes() : nil  //todo requested attributes?
             let ok = packer.packEntry(
                 name: name,
                 itemType: item.itemType,
                 itemID: item.fileId,
-                nextCookie: FSDirectoryCookie(UInt64(idx+1)),
+                nextCookie: FSDirectoryCookie(UInt64(idx + 1)),
                 attributes: attributes,
             )
 
-            if (!ok)  {
+            if !ok {
                 // fskit dont't want to continue
                 break
             }
             idx += 1
         }
 
-        return FSDirectoryVerifier(0) //todo change 0 for mutations
-    }
-
-    private func mergeAttributes(
-        _ existing: FSItem.Attributes, request: FSItem.SetAttributesRequest
-    ) {
-        if request.isValid(FSItem.Attribute.uid) {
-            existing.uid = request.uid
-        }
-
-        if request.isValid(FSItem.Attribute.gid) {
-            existing.gid = request.gid
-        }
-
-        if request.isValid(FSItem.Attribute.type) {
-            existing.type = request.type
-        }
-
-        if request.isValid(FSItem.Attribute.mode) {
-            existing.mode = request.mode
-        }
-
-        if request.isValid(FSItem.Attribute.linkCount) {
-            existing.linkCount = request.linkCount
-        }
-
-        if request.isValid(FSItem.Attribute.flags) {
-            existing.flags = request.flags
-        }
-
-        if request.isValid(FSItem.Attribute.size) {
-            existing.size = request.size
-        }
-
-        if request.isValid(FSItem.Attribute.allocSize) {
-            existing.allocSize = request.allocSize
-        }
-
-        if request.isValid(FSItem.Attribute.fileID) {
-            existing.fileID = request.fileID
-        }
-
-        if request.isValid(FSItem.Attribute.parentID) {
-            existing.parentID = request.parentID
-        }
-
-        if request.isValid(FSItem.Attribute.accessTime) {
-            let timespec = timespec()
-            request.accessTime = timespec
-            existing.accessTime = timespec
-        }
-
-        if request.isValid(FSItem.Attribute.changeTime) {
-            let timespec = timespec()
-            request.changeTime = timespec
-            existing.changeTime = timespec
-        }
-
-        if request.isValid(FSItem.Attribute.modifyTime) {
-            let timespec = timespec()
-            request.modifyTime = timespec
-            existing.modifyTime = timespec
-        }
-
-        if request.isValid(FSItem.Attribute.addedTime) {
-            let timespec = timespec()
-            request.addedTime = timespec
-            existing.addedTime = timespec
-        }
-
-        if request.isValid(FSItem.Attribute.birthTime) {
-            let timespec = timespec()
-            request.birthTime = timespec
-            existing.birthTime = timespec
-        }
-
-        if request.isValid(FSItem.Attribute.backupTime) {
-            let timespec = timespec()
-            request.backupTime = timespec
-            existing.backupTime = timespec
-        }
+        return FSDirectoryVerifier(0)  //todo change 0 for mutations
     }
 }
 
@@ -429,72 +328,19 @@ extension MyFSVolume: FSVolume.Operations {
 // }
 
 extension MyFSVolume: FSVolume.ReadWriteOperations {
-
     func read(
         from item: FSItem, at offset: off_t, length: Int, into buffer: FSMutableFileDataBuffer
     ) async throws -> Int {
-        logger.debug("read: \(item)")
-
-
         guard let item = item as? FSItemProtocol else {
             throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
         }
-        // var bytesRead = 0
-
         return try item.readData(offset: offset, length: length, into: buffer)
-            // bytesRead = data.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) in
-            //     let length = min(buffer.length, data.count)
-            //     _ = buffer.withUnsafeMutableBytes { dst in
-            //         memcpy(dst.baseAddress, ptr.baseAddress, length)
-            //     }
-            //     return length
-            // }
     }
 
     func write(contents: Data, to item: FSItem, at offset: off_t) async throws -> Int {
-        throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
-        // logger.debug("write: \(item) - \(offset)")
-
-        // if let item = item as? FSItemProtocol {
-        //     logger.debug("- write: \(item.name)")
-        //     item.data = contents
-        //     item.attributes.size = UInt64(contents.count)
-        //     item.attributes.allocSize = UInt64(contents.count)
-        // }
-
-        // return contents.count
+        guard let item = item as? WriteFSItemProtocol else {
+            throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
+        }
+        return try item.writeData(contents: contents, offset: offset)
     }
 }
-
-// extension MyFSVolume: FSVolume.XattrOperations {
-
-//     func xattr(named name: FSFileName, of item: FSItem) async throws -> Data {
-//         logger.debug("xattr: \(item) - \(name.string ?? "NA")")
-
-//         if let item = item as? FSItemProtocol {
-//             return item.xattrs[name] ?? Data()
-//         } else {
-//             return Data()
-//         }
-//     }
-
-//     func setXattr(
-//         named name: FSFileName, to value: Data?, on item: FSItem, policy: FSVolume.SetXattrPolicy
-//     ) async throws {
-//         logger.debug("setXattrOf: \(item)")
-
-//         if let item = item as? FSItemProtocol {
-//             item.xattrs[name] = value
-//         }
-//     }
-
-//     func xattrs(of item: FSItem) async throws -> [FSFileName] {
-//         logger.debug("listXattrs: \(item)")
-
-//         if let item = item as? FSItemProtocol {
-//             return Array(item.xattrs.keys)
-//         } else {
-//             return []
-//         }
-//     }
-// }
