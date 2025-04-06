@@ -26,97 +26,98 @@ enum MyError: Error {
     }
 }
 
-extension FSFileName: Comparable {
-    public static func < (lhs: FSFileName, rhs: FSFileName) -> Bool {
-        for i in 0..<min(lhs.data.count, rhs.data.count) {
-            let delta = Int(lhs.data[i]) - Int(rhs.data[i])
-            if (delta == 0) {
-                continue
-            }
-            return delta < 0
-        }
-        return lhs.data.count < rhs.data.count
-    }
-    public static func == (lhs: FSFileName, rhs: FSFileName) -> Bool {
-        return lhs.data == rhs.data
-    }
-}
+// extension FSFileName: Comparable {
+//     public static func < (lhs: FSFileName, rhs: FSFileName) -> Bool {
+//         for i in 0..<min(lhs.data.count, rhs.data.count) {
+//             let delta = Int(lhs.data[i]) - Int(rhs.data[i])
+//             if (delta == 0) {
+//                 continue
+//             }
+//             return delta < 0
+//         }
+//         return lhs.data.count < rhs.data.count
+//     }
+//     public static func == (lhs: FSFileName, rhs: FSFileName) -> Bool {
+//         return lhs.data == rhs.data
+//     }
+// }
 
 struct Indexed<T> {
     typealias Key = FSFileName
 
-    private var items: [(Key, T)] = []
-    
-    init(_ items: [(Key, T)]) {
-        self.items = items.sorted { $0.0 < $1.0 }
-    }
+    private var items: [Data:T] = [:]
+
     
     init() {
-        self.items = []
+        self.items = [:]
     }
     
     func entries() -> [(Key, T)] {
-        return items
+        return items.map { (FSFileName(data: $0.key), $0.value) }
     }
     
-    private func findIndex(for key: Key) -> Int? {
-        var low = 0
-        var high = items.count - 1
+    // private func findIndex(for key: Key) -> Int? {
+    //     var low = 0
+    //     var high = items.count - 1
         
-        while low <= high {
-            let mid = (low + high) / 2
-            let midKey = items[mid].0
+    //     while low <= high {
+    //         let mid = (low + high) / 2
+    //         let midKey = items[mid].0
             
-            if midKey == key {
-                return mid
-            } else if midKey < key {
-                low = mid + 1
-            } else {
-                high = mid - 1
-            }
-        }
+    //         if midKey == key {
+    //             return mid
+    //         } else if midKey < key {
+    //             low = mid + 1
+    //         } else {
+    //             high = mid - 1
+    //         }
+    //     }
         
-        return nil
-    }
+    //     return nil
+    // }
     
-    private func insertionPoint(for key: Key) -> Int {
-        var low = 0
-        var high = items.count - 1
+    // private func insertionPoint(for key: Key) -> Int {
+    //     var low = 0
+    //     var high = items.count - 1
         
-        while low <= high {
-            let mid = (low + high) / 2
+    //     while low <= high {
+    //         let mid = (low + high) / 2
             
-            if items[mid].0 < key {
-                low = mid + 1
-            } else {
-                high = mid - 1
-            }
-        }
+    //         if items[mid].0 < key {
+    //             low = mid + 1
+    //         } else {
+    //             high = mid - 1
+    //         }
+    //     }
         
-        return low
-    }
+    //     return low
+    // }
     
     subscript(index: Key) -> T? {
-        if let foundIndex = findIndex(for: index) {
-            return items[foundIndex].1
-        }
-        return nil
+        return items[index.data]
+        // if let foundIndex = findIndex(for: index) {
+        //     return items[foundIndex].1
+        // }
+        // return nil
     }
     
     subscript(index: Key) -> T {
         get {
-            if let foundIndex = findIndex(for: index) {
-                return items[foundIndex].1
-            }
-            fatalError("Index not found")
+            return items[index.data]!
+
+            // if let foundIndex = findIndex(for: index) {
+            //     return items[foundIndex].1
+            // }
+            // fatalError("Index not found")
         }
         set(newValue) {
-            if let existingIndex = findIndex(for: index) {
-                items[existingIndex] = (index, newValue)
-            } else {
-                let insertAt = insertionPoint(for: index)
-                items.insert((index, newValue), at: insertAt)
-            }
+            items[index.data] = newValue
+            // if let existingIndex = findIndex(for: index) {
+            //     items[existingIndex] = (index, newValue)
+            // } else {
+            //     let insertAt = insertionPoint(for: index)
+            //     items.insert((index, newValue), at: insertAt)
+            // }
         }
     }
 }
