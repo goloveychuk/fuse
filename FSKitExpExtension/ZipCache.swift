@@ -26,6 +26,101 @@ enum MyError: Error {
     }
 }
 
+extension FSFileName: Comparable {
+    public static func < (lhs: FSFileName, rhs: FSFileName) -> Bool {
+        for i in 0..<min(lhs.data.count, rhs.data.count) {
+            let delta = Int(lhs.data[i]) - Int(rhs.data[i])
+            if (delta == 0) {
+                continue
+            }
+            return delta < 0
+        }
+        return lhs.data.count < rhs.data.count
+    }
+    public static func == (lhs: FSFileName, rhs: FSFileName) -> Bool {
+        return lhs.data == rhs.data
+    }
+}
+
+struct Indexed<T> {
+    typealias Key = FSFileName
+
+    private var items: [(Key, T)] = []
+    
+    init(_ items: [(Key, T)]) {
+        self.items = items.sorted { $0.0 < $1.0 }
+    }
+    
+    init() {
+        self.items = []
+    }
+    
+    func entries() -> [(Key, T)] {
+        return items
+    }
+    
+    private func findIndex(for key: Key) -> Int? {
+        var low = 0
+        var high = items.count - 1
+        
+        while low <= high {
+            let mid = (low + high) / 2
+            let midKey = items[mid].0
+            
+            if midKey == key {
+                return mid
+            } else if midKey < key {
+                low = mid + 1
+            } else {
+                high = mid - 1
+            }
+        }
+        
+        return nil
+    }
+    
+    private func insertionPoint(for key: Key) -> Int {
+        var low = 0
+        var high = items.count - 1
+        
+        while low <= high {
+            let mid = (low + high) / 2
+            
+            if items[mid].0 < key {
+                low = mid + 1
+            } else {
+                high = mid - 1
+            }
+        }
+        
+        return low
+    }
+    
+    subscript(index: Key) -> T? {
+        if let foundIndex = findIndex(for: index) {
+            return items[foundIndex].1
+        }
+        return nil
+    }
+    
+    subscript(index: Key) -> T {
+        get {
+            if let foundIndex = findIndex(for: index) {
+                return items[foundIndex].1
+            }
+            fatalError("Index not found")
+        }
+        set(newValue) {
+            if let existingIndex = findIndex(for: index) {
+                items[existingIndex] = (index, newValue)
+            } else {
+                let insertAt = insertionPoint(for: index)
+                items.insert((index, newValue), at: insertAt)
+            }
+        }
+    }
+}
+
 // Typealias for zip information
 typealias ZipPathInfo = (zipPath: String, subpath: String)
 
@@ -164,19 +259,16 @@ final class ZipFSNode: FSItem, FSItemProtocol {
     func getChildren() throws -> [(FSFileName, FSItemProtocol)] {
         let zip = try cachedZip.get()
         let zipEntries = zip.getChildren(forId: zipId)
-        return zipEntries.map {
+        return zipEntries.entries().map {
             (
-                FSFileName(string: $0.key),
-                ZipFSNode(cachedZip: cachedZip, zipId: $0.value, parentId: fileId)
+                $0.0,
+                ZipFSNode(cachedZip: cachedZip, zipId: $0.1, parentId: fileId)
             )
         }
     }
     func getChild(name: FSFileName) throws -> FSItemProtocol? {
         let zip = try cachedZip.get()
         let zipEntries = zip.getChildren(forId: zipId)
-        guard let name = name.string else {  //todo replace all with bytes??
-            return nil
-        }
         if let zipEntry = zipEntries[name] {
             return ZipFSNode(cachedZip: cachedZip, zipId: zipEntry, parentId: parentId)
         }
@@ -189,10 +281,8 @@ final class ZipFSNode: FSItem, FSItemProtocol {
             throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
         }
         let zipEntry = listableZip.getEntry(index: entryInd)
-        guard let symlinkName = zipEntry.symlinkName else {
-            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
-        }
-        return FSFileName(string: symlinkName)
+        // fatalError("not impl") 
+        return FSFileName(string: "asd")
     }
 
     func readData(offset: off_t, length: Int, into buffer: FSMutableFileDataBuffer) throws -> Int {
@@ -431,14 +521,14 @@ final class ZipHardDependencyFSNode: HardDependencyFSNode {
         let rootId =
             try cachedRootId
             ?? {
-                let rootId = try listableZip.getIdForPath(path: zipInfo.subpath)
+                let rootId = try listableZip.getIdForPath(path: ZipPath(path: zipInfo.subpath))
                 cachedRootId = rootId  // todo mutex?
                 return rootId
             }()
         return rootId
     }
 
-    private func getZipChildren() throws -> [PathSegment: ZipID] {
+    private func getZipChildren() throws -> Indexed<ZipID> {
         let listableZip = try cachedZip.get()
         return listableZip.getChildren(forId: try getRootId(listableZip: listableZip))
     }
@@ -446,10 +536,10 @@ final class ZipHardDependencyFSNode: HardDependencyFSNode {
     override func getChildren() throws -> [(FSFileName, FSItemProtocol)] {
         var children = try super.getChildren()
         let zipChildren = try getZipChildren()
-        children += zipChildren.map {
+        children += zipChildren.entries().map {
             (
-                FSFileName(string: $0.key),
-                ZipFSNode(cachedZip: cachedZip, zipId: $0.value, parentId: fileId)
+                $0.0,
+                ZipFSNode(cachedZip: cachedZip, zipId: $0.1, parentId: fileId)
             )
         }
 
@@ -458,9 +548,6 @@ final class ZipHardDependencyFSNode: HardDependencyFSNode {
     override func getChild(name: FSFileName) throws -> FSItemProtocol? {
         if let child = try super.getChild(name: name) {
             return child
-        }
-        guard let name = name.string else {  //todo move to higher level? replace with bytes?
-            return nil
         }
         let zipChildren = try getZipChildren()
         if let zipEntry = zipChildren[name] {

@@ -1,6 +1,6 @@
 import Darwin
 import Foundation
-
+import FSKit
 enum ZipError: Error {
     case invalidZipFile(String)
     case unsupportedZipFeature(String)
@@ -50,8 +50,10 @@ enum CompressionMethod {
     }
 }
 
+
+
 struct ZipEntry {  //todo minimal
-    let name: String
+    let name: ZipPath
     let compressionMethod: CompressionMethod
     let size: UInt32
     let os: UInt8
@@ -72,6 +74,72 @@ enum ZipID {
     }
 }
 
+typealias ZipPath = Data
+typealias ZipPathSegment = Data
+
+extension ZipPath {
+    private static let slash: UInt8 = 0x2f
+    static let Root = Data([slash])
+    // Debug representation of path
+    var asd: String {
+        if self == ZipPath.Root {
+            return "/"
+        }
+        return String(data: self, encoding: .utf8) ?? "<invalid UTF-8 data>"
+    }
+    
+    // Convert path to String for display
+    var pathString: String {
+        return String(data: self, encoding: .utf8) ?? ""
+    }
+    func splitPath() -> [ZipPathSegment] {
+        var segments: [ZipPathSegment] = []
+        var currentSegment: [UInt8] = []
+
+        for byte in self {
+            if byte == ZipPath.slash {
+                if !currentSegment.isEmpty {
+                    segments.append(Data(currentSegment))
+                    currentSegment.removeAll()
+                }
+            } else {
+                currentSegment.append(byte)
+            }
+        }
+
+        if !currentSegment.isEmpty {
+            segments.append(Data(currentSegment))
+        }
+
+        return segments
+    }
+    init(path: String) {
+        self.init(path.utf8)
+    }
+    func splitPathParent() -> (ZipPathSegment, ZipPathSegment) {
+        // check for short empty and slash
+        var to = self.count - 1
+        for i in stride(from: self.count - 1, through: 0, by: -1) {
+            if self[i] == ZipPath.slash {
+                if (i == self.count - 1) {
+                    to -= 1
+                    continue
+                }
+                let parentPath = self[0...i]
+                let last = self[(i + 1)...to]
+                return (parentPath, last)
+            }
+        }
+        return (Data([ZipPath.slash]), self[0...to])
+    }
+    func isDir() -> Bool {
+        return self.last == ZipPath.slash
+    }
+    var filename: FSFileName {
+        return FSFileName(data: self)
+    }
+}
+
 extension String {
     /// Splits the string once from the right side based on the given separator
     /// Returns a tuple with the part before the separator and the part after the separator
@@ -88,22 +156,22 @@ extension String {
     }
 }
 
-typealias Listings = [[PathSegment: ZipID]]
+typealias Listings = [Indexed<ZipID>]
 
-extension Listings {
-    func print(ind: Int = 0, depth: Int = 0) -> String {
-        var result = ""
-        for item in self[ind] {
-            let key = item.key
-            let value = item.value
-            result += String(repeating: "   ", count: depth) + "\(key):\n"
-            if case .dir(let index) = value {
-                result += self.print(ind: index, depth: depth + 1)
-            }
-        }
-        return result
-    }
-}
+// extension Listings {
+//     func print(ind: Int = 0, depth: Int = 0) -> String {
+//         var result = ""
+//         for item in self[ind] {
+//             let key = item.key
+//             let value = item.value
+//             result += String(repeating: "   ", count: depth) + "\(key):\n"
+//             if case .dir(let index) = value {
+//                 result += self.print(ind: index, depth: depth + 1)
+//             }
+//         }
+//         return result
+//     }
+// }
 
 struct MinEntry {
     let localHeaderOffset: UInt32
@@ -111,8 +179,11 @@ struct MinEntry {
     let size: UInt32
     // let isSymbolicLink: Bool
     let compressionMethod: CompressionMethod
-    let symlinkName: String?  //only for symlink
+    // let symlinkName: FSFileName?  //only for symlink
 }
+
+
+
 
 class ListableZip {
 
@@ -128,9 +199,9 @@ class ListableZip {
     private let listings: Listings
     private let fileURL: URL
 
-    func getIdForPath(path: String) throws -> ZipID {
+    func getIdForPath(path: ZipPath) throws -> ZipID {
         var currentId: ZipID = .root
-        for part in path.split(separator: "/") {
+        for part in path.splitPath() {
             if part.isEmpty {
                 continue
             }
@@ -138,7 +209,7 @@ class ListableZip {
                 throw ZipError.invalidListing("Invalid path, not dir")
             }
             let list = listings[listingId]
-            guard let childId = list[String(part)] else {
+            guard let childId = list[part.filename] else {
                 throw ZipError.invalidListing("Invalid path, cannot found child \(part)")
             }
             currentId = childId
@@ -146,9 +217,9 @@ class ListableZip {
         return currentId
     }
 
-    func getChildren(forId: ZipID) -> [PathSegment: ZipID] {
+    func getChildren(forId: ZipID) -> Indexed<ZipID> {
         guard case .dir(let index) = forId else {
-            return [:]  //todo throw
+            return Indexed() //todo throw
         }
         return listings[index]
     }
@@ -227,34 +298,32 @@ class ListableZip {
         let entries = try ListableZip.readZipEntries(fileURL: fileURL)
         var listings = Listings()
 
-        var nameToIndMap: [String: Int] = [String: Int]()
+        var nameToIndMap = [ZipPathSegment: Int]()
 
-        func addDirectory(parent: String) throws -> ZipID {
+        func addDirectory(parent: ZipPathSegment) throws -> ZipID {
             if nameToIndMap[parent] != nil {
                 throw ZipError.invalidListing("Directory already exists")
             }
             let newIndex = ZipID.dir(listingId: listings.count)
             nameToIndMap[parent] = listings.count
-            listings.append([:])
+            listings.append(Indexed())
             return newIndex
         }
 
-        func addListings(parent: String, childName: PathSegment, childID: ZipID) throws {
+        func addListings(parent: ZipPath, childName: ZipPath, childID: ZipID) throws {
             guard let parentId = nameToIndMap[parent] else {
                 throw ZipError.invalidListing("Parent directory not found")
             }
-            listings[parentId][childName] = childID
+            listings[parentId][childName.filename] = childID
         }
 
-        _ = try addDirectory(parent: "/")
+        _ = try addDirectory(parent: ZipPath.Root)
 
         for entry in entries {
-            let isDir = entry.name.last == "/"
-            var path = entry.name
+            let isDir = entry.name.isDir()
             var zipID: ZipID
             if isDir {
                 zipID = try addDirectory(parent: entry.name)
-                path = String(path.dropLast())
             } else {
                 let ind = allEntries.count
                 allEntries.append(
@@ -262,8 +331,9 @@ class ListableZip {
                         localHeaderOffset: entry.localHeaderOffset,
                         compressedSize: entry.compressedSize,
                         size: entry.size,
-                        compressionMethod: entry.compressionMethod,
-                        symlinkName: entry.isSymbolicLink ? entry.name : nil))
+                        compressionMethod: entry.compressionMethod
+                    )
+                )
 
                 if entry.isSymbolicLink {
                     zipID = ZipID.symlink(entryId: ind)
@@ -271,14 +341,8 @@ class ListableZip {
                     zipID = ZipID.file(entryId: ind)
                 }
             }
-            var (parent, name) = path.splitOnceFromRight(separator: "/")
-            if name == nil {
-                name = parent
-                parent = "/"
-            } else {
-                parent = parent + "/"
-            }
-            try addListings(parent: parent, childName: name!, childID: zipID)
+            let (parent, name) = entry.name.splitPathParent()
+            try addListings(parent: parent, childName: name, childID: zipID)
         }
         // let stringified = listings.print()
         self.listings = listings
@@ -405,16 +469,17 @@ class ListableZip {
 
             // Extract name
             let nameData = cdBuffer.subdata(in: (offset + 46)..<(offset + 46 + Int(nameLength)))
-            guard
-                let name = String(data: nameData, encoding: .utf8)?.replacingOccurrences(
-                    of: "\0", with: " ")
-            else {
-                throw ZipError.invalidZipFile("Invalid ZIP file")
-            }
+            //todo check for \0???
+            // guard
+            //     let name = String(data: nameData, encoding: .utf8)?.replacingOccurrences(
+            //         of: "\0", with: " ")
+            // else {
+            //     throw ZipError.invalidZipFile("Invalid ZIP file")
+            // }
 
-            if name.contains("\0") {
-                throw ZipError.invalidZipFile("Invalid ZIP file")
-            }
+            // if name.contains("\0") {
+            //     throw ZipError.invalidZipFile("Invalid ZIP file")
+            // }
 
             let isSymbolicLink =
                 os == ZIP_UNIX && ((UInt16(externalAttributes >> 16)) & S_IFMT) == S_IFLNK  //todo check UInt16()
@@ -425,7 +490,7 @@ class ListableZip {
 
             entries.append(
                 ZipEntry(
-                    name: name,
+                    name: nameData,
                     compressionMethod: compressionMethod,
                     size: size,
                     os: os,
