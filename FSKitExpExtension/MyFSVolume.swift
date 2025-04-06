@@ -125,6 +125,7 @@ extension MyFSVolume: FSVolume.Operations {
     }
 
     func deactivate(options: FSDeactivateOptions = []) async throws {
+        // resource.revoke()
         logger.debug("deactivate")
     }
 
@@ -138,7 +139,7 @@ extension MyFSVolume: FSVolume.Operations {
     }
 
     func synchronize(flags: FSSyncFlags) async throws {
-        logger.debug("synchronize")
+        // logger.debug("synchronize")
     }
 
     func attributes(
@@ -149,7 +150,7 @@ extension MyFSVolume: FSVolume.Operations {
         if let item = item as? FSItemProtocol {
             return try item.getAttributes()
         } else {
-            logger.debug("getItemAttributes2: \(item), \(desiredAttributes)")
+            // logger.debug("getItemAttributes2: \(item), \(desiredAttributes)")
             throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
         }
     }
@@ -169,7 +170,7 @@ extension MyFSVolume: FSVolume.Operations {
         named name: FSFileName,
         inDirectory directory: FSItem
     ) async throws -> (FSItem, FSFileName) {
-        logger.debug("lookupName: \(String(describing: name.string)), \(directory)")
+        // logger.debug("lookupName: \(String(describing: name.string)), \(directory)")
 
         guard let directory = directory as? FSItemProtocol else {
             throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
@@ -184,7 +185,7 @@ extension MyFSVolume: FSVolume.Operations {
 
     func reclaimItem(_ item: FSItem) async throws {
         //todo rm zip archives. Mb use timers and debouncers
-        logger.debug("reclaimItem: \(item)")
+        // logger.debug("reclaimItem: \(item)")
     }
 
     func readSymbolicLink(
