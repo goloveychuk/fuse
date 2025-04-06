@@ -251,7 +251,7 @@ final class ZipFSNode: FSItem, FSItemProtocol {
         switch zipId {
         case .dir(let listingId):
             self.fileId = parentId.advance(by: listingId)
-        case .file(let entryInd), .symlink(let entryInd):
+        case .file(let entryInd, _), .symlink(let entryInd):
             self.fileId = parentId.advance(by: 10000 + entryInd)  //todo
         }
     }
@@ -303,7 +303,7 @@ final class ZipFSNode: FSItem, FSItemProtocol {
         case .symlink(_):
             throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
 
-        case .file(let entryInd):
+        case .file(let entryInd, _):
             let listableZip = try self.cachedZip.get()
             let zipEntry = listableZip.getEntry(index: entryInd)
             switch zipEntry.compressionMethod {
@@ -390,13 +390,13 @@ final class ZipFSNode: FSItem, FSItemProtocol {
             attr.size = 1
             attr.allocSize = 1
             attr.mode = UInt32(S_IFLNK | 0o644)  //todo get original, because there are executable
-        case .file(let entryInd):
+        case .file(let entryInd, let permissions):
             let listableZip = try self.cachedZip.get()
             let zipEntry = listableZip.getEntry(index: entryInd)
             attr.linkCount = cachedZip.refCount
             attr.size = UInt64(zipEntry.size)
             attr.allocSize = UInt64(zipEntry.compressedSize)  //todo not sure
-            attr.mode = UInt32(S_IFREG | 0o644)  // todo get original, because there are executable
+            attr.mode = UInt32(S_IFREG | permissions)  // todo get original, because there are executable
         }
         return attr
     }

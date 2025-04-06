@@ -60,13 +60,20 @@ struct ZipEntry {  //todo minimal
     let isSymbolicLink: Bool
     let crc: UInt32
     let compressedSize: UInt32
-    let externalAttributes: UInt32
+    let linuxAttributes: UInt16
     let mtime: Date
     let localHeaderOffset: UInt32
 }
 
+typealias Permissions = UInt16
+extension Permissions {
+    init(fromUnsafe: UInt16) {
+        self = Permissions(fromUnsafe & 0b111_111_111) // getting standard rwx permissions
+    }
+}
+
 enum ZipID {
-    case file(entryId: Int)
+    case file(entryId: Int, permissions: Permissions)
     case symlink(entryId: Int)
     case dir(listingId: Int)
     static var root: ZipID {
@@ -334,11 +341,11 @@ class ListableZip {
                         compressionMethod: entry.compressionMethod
                     )
                 )
-
+                let permissions = Permissions(fromUnsafe: entry.linuxAttributes)
                 if entry.isSymbolicLink {
                     zipID = ZipID.symlink(entryId: ind)
                 } else {
-                    zipID = ZipID.file(entryId: ind)
+                    zipID = ZipID.file(entryId: ind, permissions: permissions)
                 }
             }
             let (parent, name) = entry.name.splitPathParent()
@@ -481,8 +488,16 @@ class ListableZip {
             //     throw ZipError.invalidZipFile("Invalid ZIP file")
             // }
 
+            // 31                    16 15            0
+            // +----------------------+---------------+
+            // | Unix file mode bits  |  MS-DOS attrs |
+            // +----------------------+---------------+
+            //      (high 16 bits)      (low 16 bits)
+
+            let linuxAttributes = UInt16(externalAttributes >> 16) //todo check if linux
+
             let isSymbolicLink =
-                os == ZIP_UNIX && ((UInt16(externalAttributes >> 16)) & S_IFMT) == S_IFLNK  //todo check UInt16()
+                os == ZIP_UNIX && (linuxAttributes & S_IFMT) == S_IFLNK  //todo check UInt16()
 
             //todo check
             // let isDir =
@@ -497,7 +512,7 @@ class ListableZip {
                     isSymbolicLink: isSymbolicLink,
                     crc: crc,
                     compressedSize: compressedSize,
-                    externalAttributes: externalAttributes,
+                    linuxAttributes: linuxAttributes,
                     mtime: SAFE_TIME,
                     localHeaderOffset: localHeaderOffset
                 ))
