@@ -45,25 +45,24 @@ enum MyError: Error {
 struct Indexed<T> {
     typealias Key = FSFileName
 
-    private var items: [Data:T] = [:]
+    private var items: [Data: T] = [:]
 
-    
     init() {
         self.items = [:]
     }
-    
+
     func entries() -> [(Key, T)] {
         return items.map { (FSFileName(data: $0.key), $0.value) }
     }
-    
+
     // private func findIndex(for key: Key) -> Int? {
     //     var low = 0
     //     var high = items.count - 1
-        
+
     //     while low <= high {
     //         let mid = (low + high) / 2
     //         let midKey = items[mid].0
-            
+
     //         if midKey == key {
     //             return mid
     //         } else if midKey < key {
@@ -72,27 +71,27 @@ struct Indexed<T> {
     //             high = mid - 1
     //         }
     //     }
-        
+
     //     return nil
     // }
-    
+
     // private func insertionPoint(for key: Key) -> Int {
     //     var low = 0
     //     var high = items.count - 1
-        
+
     //     while low <= high {
     //         let mid = (low + high) / 2
-            
+
     //         if items[mid].0 < key {
     //             low = mid + 1
     //         } else {
     //             high = mid - 1
     //         }
     //     }
-        
+
     //     return low
     // }
-    
+
     subscript(index: Key) -> T? {
         return items[index.data]
         // if let foundIndex = findIndex(for: index) {
@@ -100,7 +99,7 @@ struct Indexed<T> {
         // }
         // return nil
     }
-    
+
     subscript(index: Key) -> T {
         get {
             return items[index.data]!
@@ -277,13 +276,26 @@ final class ZipFSNode: FSItem, FSItemProtocol {
     }
 
     func readSymbolicLink() throws -> FSFileName {
-        let listableZip = try self.cachedZip.get()
         guard case .symlink(let entryInd) = zipId else {
             throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
         }
+        let data = try readFileToBuffer(entryInd: entryInd)
+        return FSFileName(data: data)
+    }
+
+    private func readFileToBuffer(entryInd: Int) throws -> Data {
+        let listableZip = try self.cachedZip.get()
         let zipEntry = listableZip.getEntry(index: entryInd)
-        // fatalError("not impl") 
-        return FSFileName(string: "asd")
+        var data = Data(capacity: Int(zipEntry.compressedSize))
+        let read = try data.withUnsafeMutableBytes { (body: UnsafeMutableRawBufferPointer) in
+            return try listableZip.readData(
+                index: entryInd, offset: 0, length: Int(zipEntry.compressedSize),
+                bufferPointer: body)
+        }
+        if read != zipEntry.compressedSize {
+            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        }
+        return data
     }
 
     func readData(offset: off_t, length: Int, into buffer: FSMutableFileDataBuffer) throws -> Int {
@@ -296,8 +308,48 @@ final class ZipFSNode: FSItem, FSItemProtocol {
             let zipEntry = listableZip.getEntry(index: entryInd)
             switch zipEntry.compressionMethod {
             case .deflate:
-                throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)  //todo
-            // compression_decode_buffer(UnsafeMutablePointer<UInt8>, Int, UnsafePointer<UInt8>, Int, UnsafeMutableRawPointer?, compression_algorithm)
+                let compressedData = try readFileToBuffer(entryInd: entryInd)
+                
+                // Create a temporary buffer for decompressed data
+                let destinationSize = Int(zipEntry.size)
+                
+                // If offset is beyond the file size, return 0 bytes read
+                if offset >= destinationSize {
+                    return 0
+                }
+                
+                var decompressedData = Data(count: destinationSize)
+                
+                let bytesDecompressed = decompressedData.withUnsafeMutableBytes { decompressedBuffer in
+                    return compressedData.withUnsafeBytes { compressedBuffer in
+                        // Use Compression framework to decompress
+                        return compression_decode_buffer(
+                            decompressedBuffer.baseAddress!,
+                            destinationSize,
+                            compressedBuffer.baseAddress!,
+                            compressedData.count,
+                            nil,
+                            COMPRESSION_ZLIB
+                        )
+                    }
+                }
+                
+                if bytesDecompressed != destinationSize {
+                    throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+                }
+                
+                // Calculate how many bytes to copy accounting for offset and available data
+                let availableBytes = destinationSize - Int(offset)
+                let bytesToCopy = min(availableBytes, length)
+                
+                // Copy the decompressed data to the output buffer, respecting offset
+                return buffer.withUnsafeMutableBytes { outputBuffer in
+                    decompressedData.withUnsafeBytes { sourceBuffer in
+                        let source = sourceBuffer.baseAddress!.advanced(by: Int(offset))
+                        memcpy(outputBuffer.baseAddress!, source, bytesToCopy)
+                        return bytesToCopy
+                    }
+                }
 
             case .store:
                 return try buffer.withUnsafeMutableBytes { rawBuffer in
