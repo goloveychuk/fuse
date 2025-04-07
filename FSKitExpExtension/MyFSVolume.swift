@@ -28,6 +28,8 @@ final class MyFSVolume: FSVolume {
         )
     }
 }
+// extension MyFSVolume: FSVolumeKernelOffloadedIOOperations
+
 
 extension MyFSVolume: FSVolume.PathConfOperations {
 
@@ -55,6 +57,16 @@ extension MyFSVolume: FSVolume.PathConfOperations {
         return UInt64.max
     }
 }
+
+extension MyFSVolume: FSVolume.ItemDeactivation {
+    var itemDeactivationPolicy : FSVolume.ItemDeactivationOptions {
+        return ItemDeactivationOptions.always
+    }
+    func deactivateItem(_ item: FSItem) async throws {
+        // logger.debug("deactivateItem: \(item)")   
+    }
+}
+
 
 extension MyFSVolume: FSVolume.Operations {
 
@@ -184,6 +196,7 @@ extension MyFSVolume: FSVolume.Operations {
     }
 
     func reclaimItem(_ item: FSItem) async throws {
+        // logger.debug("deactivateItem: \(item)")   
         //todo rm zip archives. Mb use timers and debouncers
         // logger.debug("reclaimItem: \(item)")
     }
