@@ -83,7 +83,6 @@ private func mergeAttributes(
     }
 }
 
-
 // MARK: - File Descriptor Wrappers
 
 /// Safe wrapper for directory file descriptors
@@ -91,7 +90,7 @@ struct DirFd {
     let rawValue: Int32
 
     init(_ fd: Int32) {
-        
+
         self.rawValue = fd
     }
 }
@@ -115,10 +114,8 @@ enum Safe {
         guard fd >= 0 else {
             throw fs_errorForPOSIXError(errno)
         }
-        return  FileFd(fd)
+        return FileFd(fd)
     }
-
-    
 
     static func openatDirectory(dirfd: DirFd, path: String, flags: Int32, mode: mode_t = 0) throws
         -> DirFd
@@ -135,13 +132,13 @@ enum Safe {
         guard newFd >= 0 else {
             throw fs_errorForPOSIXError(errno)
         }
-        return  DirFd(newFd)
+        return DirFd(newFd)
     }
 
     static func fdopendir(fd: DirFd) throws -> UnsafeMutablePointer<DIR> {
         // Duplicate the FD to avoid closing the original when fdopendir takes ownership
         let tempFD = try Safe.dup(fd: DirFd(fd.rawValue))
-        
+
         guard let dir = Darwin.fdopendir(tempFD.rawValue) else {
             try Safe.closeFD(dir: tempFD)
             throw fs_errorForPOSIXError(errno)
@@ -159,7 +156,7 @@ enum Safe {
         Darwin.rewinddir(dir)
     }
 
-    static func  closeFD(dir: DirFd) throws {
+    static func closeFD(dir: DirFd) throws {
         guard Darwin.close(dir.rawValue) == 0 else {
             throw fs_errorForPOSIXError(errno)
         }
@@ -346,13 +343,15 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
     // }
 
     // MARK: - FSItemProtocol Methods
+    let lock = NSLock()
 
     func getChildren() throws -> [(FSFileName, FSItemProtocol)] {
         if let entries = cachedEntries {
             return entries.map { (FSFileName(string: $0.key), $0.value) }
         }
+        lock.lock()
+        defer { lock.unlock() }
 
-        
         let dir = try Safe.fdopendir(fd: dirFD)
 
         defer { try? Safe.closedir(dir: dir) }
@@ -387,7 +386,9 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
                 var statBuf = stat()
                 let entryPath = name
                 do {
-                    try Safe.fstatat(dirfd: dirFD, path: entryPath, statBuf: &statBuf, flags: AT_SYMLINK_NOFOLLOW)
+                    try Safe.fstatat(
+                        dirfd: dirFD, path: entryPath, statBuf: &statBuf, flags: AT_SYMLINK_NOFOLLOW
+                    )
                     if (statBuf.st_mode & S_IFMT) == S_IFDIR {
                         type = .directory
                     } else if (statBuf.st_mode & S_IFMT) == S_IFREG {
@@ -404,14 +405,15 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
 
             if type == .directory {
                 // Open subdirectory with O_DIRECTORY
-                do {
-                    let itemFD = try Safe.openatDirectory(dirfd: dirFD, path: name, flags: O_RDONLY, mode: 0)
-                    entries[name] = PortalDirFSItem(
-                        fileId: nextID, parentId: fileId, dirFD: itemFD)
-                } catch {
-                    logger.error("Failed to open subdirectory: \(error.localizedDescription)")
-                    continue
-                }
+                // do {
+                let itemFD = try Safe.openatDirectory(
+                    dirfd: dirFD, path: name, flags: O_RDONLY, mode: 0)
+                entries[name] = PortalDirFSItem(
+                    fileId: nextID, parentId: fileId, dirFD: itemFD)
+                // } catch {
+                //     logger.error("Failed to open subdirectory: \(error.localizedDescription)")
+                //     continue
+                // }
             } else {
                 // Open file
                 entries[name] = PortalFileFSItem(
@@ -422,7 +424,7 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
             nextID = nextID.advance(by: 1)
         }
 
-        cachedEntries = entries
+        // cachedEntries = entries
         return entries.map { (FSFileName(string: $0.key), $0.value) }
     }
 
@@ -430,6 +432,8 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
         guard let nameStr = name.string else {
             return nil
         }
+        lock.lock()
+        defer { lock.unlock() }
 
         // Try getting from cache first
         if let entries = cachedEntries, let item = entries[nameStr] {
@@ -438,11 +442,8 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
 
         // Otherwise, open the file to check if it exists and determine its type
         var statBuf = stat()
-        do {
-            try Safe.fstatat(dirfd: dirFD, path: nameStr, statBuf: &statBuf, flags: AT_SYMLINK_NOFOLLOW)
-        } catch {
-            return nil  // File doesn't exist
-        }
+
+        try Safe.fstatat(dirfd: dirFD, path: nameStr, statBuf: &statBuf, flags: AT_SYMLINK_NOFOLLOW)
 
         let nextID = fileId.advance(by: UInt64(nameStr.hash & 0x7FFF_FFFF))
 
@@ -450,7 +451,8 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
         if (statBuf.st_mode & S_IFMT) == S_IFDIR {
             type = .directory
             do {
-                let newFD = try Safe.openatDirectory(dirfd: dirFD, path: nameStr, flags: O_RDONLY, mode: 0)
+                let newFD = try Safe.openatDirectory(
+                    dirfd: dirFD, path: nameStr, flags: O_RDONLY, mode: 0)
                 return PortalDirFSItem(
                     fileId: nextID, parentId: fileId, dirFD: newFD)
             } catch {
@@ -590,8 +592,9 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
 
         // Handle the case where source and destination are in the same directory
         if sourceDirectory === self && destinationDirectory === self {
-            try Safe.renameat(fromDirfd: dirFD, fromPath: sourceNameStr, 
-                             toDirfd: dirFD, toPath: destNameStr)
+            try Safe.renameat(
+                fromDirfd: dirFD, fromPath: sourceNameStr,
+                toDirfd: dirFD, toPath: destNameStr)
 
             // Update cache if needed
             if var entries = cachedEntries, let item = entries.removeValue(forKey: sourceNameStr) {
@@ -604,8 +607,9 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
 
         // If destination directory is also a PortalDirFSItem, we can use renameat
         if let destDir = destinationDirectory as? PortalDirFSItem {
-            try Safe.renameat(fromDirfd: dirFD, fromPath: sourceNameStr, 
-                             toDirfd: destDir.dirFD, toPath: destNameStr)
+            try Safe.renameat(
+                fromDirfd: dirFD, fromPath: sourceNameStr,
+                toDirfd: destDir.dirFD, toPath: destNameStr)
 
             // Update cache if needed
             cachedEntries?.removeValue(forKey: sourceNameStr)
@@ -642,7 +646,8 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
                 {
                     let uid = newAttributes.isValid(FSItem.Attribute.uid) ? newAttributes.uid : ~0
                     let gid = newAttributes.isValid(FSItem.Attribute.gid) ? newAttributes.gid : ~0
-                    try Safe.fchownat(dirfd: dirFD, path: nameStr, uid: uid, gid: gid, flags: AT_SYMLINK_NOFOLLOW)
+                    try Safe.fchownat(
+                        dirfd: dirFD, path: nameStr, uid: uid, gid: gid, flags: AT_SYMLINK_NOFOLLOW)
                 }
             } catch {
                 logger.error("Failed to set attributes on symlink: \(error.localizedDescription)")
@@ -654,7 +659,8 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
             let nextID = fileId.advance(by: UInt64(nameStr.hash & 0x7FFF_FFFF))
 
             let item = PortalFileFSItem(
-                fileId: nextID, parentId: fileId, dirFd: dirFD, fileFd: itemFD.rawValue, name: nameStr,
+                fileId: nextID, parentId: fileId, dirFd: dirFD, fileFd: itemFD.rawValue,
+                name: nameStr,
                 itemType: .symlink)
 
             // Update cache if needed
@@ -685,7 +691,7 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
             try Safe.mkdirat(dirfd: dirFD, path: nameStr, mode: 0o755)
 
             let itemFD = try Safe.openatDirectory(dirfd: dirFD, path: nameStr, flags: O_RDONLY)
-            
+
             let dirItem = PortalDirFSItem(
                 fileId: nextID, parentId: fileId, dirFD: itemFD)
 
@@ -707,7 +713,8 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
         case .file:
             // Create file
             let initialMode: mode_t = 0o644
-            let fd = try Safe.openat(dirfd: dirFD, path: nameStr, flags: O_RDWR | O_CREAT | O_EXCL, mode: initialMode)
+            let fd = try Safe.openat(
+                dirfd: dirFD, path: nameStr, flags: O_RDWR | O_CREAT | O_EXCL, mode: initialMode)
 
             let fileItem = PortalFileFSItem(
                 fileId: nextID, parentId: fileId, dirFd: dirFD, fileFd: fd.rawValue, name: nameStr,
@@ -762,12 +769,12 @@ final class PortalFileFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
         if let cachedFd = cachedFd {
             return FileFd(cachedFd)
         }
-        
+
         let fd = try Safe.openat(dirfd: dirFd, path: fileName, flags: O_RDONLY)
         cachedFd = fd.rawValue
         return fd
     }
-    
+
     deinit {
         // Close the file descriptor when this object is deallocated
         if let fd = cachedFd {
@@ -833,7 +840,8 @@ final class PortalFileFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
 
         // Read data
         return try buffer.withUnsafeMutableBytes { bufferPtr in
-            try Safe.read(fd: fd, buffer: bufferPtr.baseAddress!, size: min(length, bufferPtr.count))
+            try Safe.read(
+                fd: fd, buffer: bufferPtr.baseAddress!, size: min(length, bufferPtr.count))
         }
     }
 
@@ -847,8 +855,9 @@ final class PortalFileFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
         var buffer = [CChar](repeating: 0, count: bufferSize)
 
         // Read symbolic link
-        let result = try Safe.readlinkat(dirfd: dirFd, path: fileName, buffer: &buffer, size: bufferSize)
-        
+        let result = try Safe.readlinkat(
+            dirfd: dirFd, path: fileName, buffer: &buffer, size: bufferSize)
+
         // Use the recommended string initialization method instead of deprecated one
         let linkTarget = buffer.withUnsafeBufferPointer { bufferPtr in
             let bytes = UnsafeRawBufferPointer(start: bufferPtr.baseAddress, count: result)
@@ -861,7 +870,7 @@ final class PortalFileFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
 
     func setAttributes(newAttributes: FSItem.SetAttributesRequest) throws -> FSItem.Attributes {
         let fd = try getFd()
-        
+
         // Handle permissions
         if newAttributes.isValid(FSItem.Attribute.mode) {
             try Safe.fchmod(fd: fd, mode: mode_t(newAttributes.mode & 0o777))
@@ -932,8 +941,9 @@ final class PortalFileFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
 
         // Create hard link from this file to the destination
         let dirFD = try destDir.getDirectoryFileDescriptor()
-        try Safe.linkat(fromDirfd: dirFd, fromPath: fileName, 
-                      toDirfd: dirFD, toPath: destName)
+        try Safe.linkat(
+            fromDirfd: dirFd, fromPath: fileName,
+            toDirfd: dirFD, toPath: destName)
 
         return name
     }
