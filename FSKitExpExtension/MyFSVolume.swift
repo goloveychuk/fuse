@@ -169,13 +169,13 @@ extension MyFSVolume: FSVolume.Operations {
                 // let depTree = try DependencyNode.fromJSONData(data)
                 // let depFsNode = DependencyFSNodeCreator().buildTree(from: depTree)
                 // return depFsNode
-                let fd = open("/Users/vadymh/github/fskit/FSKitSample/test2", O_RDONLY | O_DIRECTORY, 0)
+                let fd = open("/Users/vadymh/work/responsive-editor2/node_modules", O_RDONLY | O_DIRECTORY, 0)
                 if fd < 0 {
                     let error = errno
                     // logger.error("Failed to open directory: \(path), error: \(error)")
                     throw fs_errorForPOSIXError(error)
                 }
-                return PortalDirFSItem(fileId: .rootDirectory, parentId: .parentOfRoot, dirFD: fd)
+                return PortalDirFSItem(fileId: .rootDirectory, parentId: .parentOfRoot, dirFD: DirFd(fd))
             }()
             return root
 
