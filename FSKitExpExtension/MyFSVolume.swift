@@ -9,13 +9,44 @@ import FSKit
 import Foundation
 import os
 
-final class MyFSVolume: FSVolume {
+// func readDirectoryEntriesUsingGetdirentries(fd: Int32) throws -> [(
+//     name: String, type: FSItem.ItemType
+// )] {
+//     // try Filena.contentsOfDirectory
+//     defer { close(fd) }
 
+//     // Use a reasonably sized buffer for directory entries
+//     let bufferSize = 8192
+//     var buffer = [UInt8](repeating: 0, count: bufferSize)
+//     var position: Int = 0
+//     // var results = [(name: String, type: FSItem.ItemType)]()
+
+//     while true {
+//         // Call getdirentries to fill buffer with directory entries
+//         let bytesRead = getdirentries(fd, &buffer, Int32(bufferSize), &position)
+
+//         if bytesRead <= 0 {
+//             if bytesRead < 0 {
+//                 let error = errno
+//                 // logger.error("getdirentries_b failed: \(error)")
+//                 throw fs_errorForPOSIXError(error)
+//             }
+//             break  // No more entries
+//         }
+
+//     }
+
+//     return results
+// }
+
+final class MyFSVolume: FSVolume {
+    // var fd1: Int32 = -1
+    var fd2: Int32 = -1
     private let resource: FSResource
     var urls: [URL?]?
     private var depTree: DependencyNode?
+    var p: [URL?]?
     var mount3: FSTaskOptions? = nil
-    var mount2: FSTaskOptions? = nil
 
     private let logger = Logger(subsystem: "FSKitExp", category: "MyFSVolume")
 
@@ -29,7 +60,6 @@ final class MyFSVolume: FSVolume {
     }
 }
 // extension MyFSVolume: FSVolumeKernelOffloadedIOOperations
-
 
 extension MyFSVolume: FSVolume.PathConfOperations {
 
@@ -59,14 +89,13 @@ extension MyFSVolume: FSVolume.PathConfOperations {
 }
 
 extension MyFSVolume: FSVolume.ItemDeactivation {
-    var itemDeactivationPolicy : FSVolume.ItemDeactivationOptions {
+    var itemDeactivationPolicy: FSVolume.ItemDeactivationOptions {
         return ItemDeactivationOptions.always
     }
     func deactivateItem(_ item: FSItem) async throws {
-        // logger.debug("deactivateItem: \(item)")   
+        // logger.debug("deactivateItem: \(item)")
     }
 }
-
 
 extension MyFSVolume: FSVolume.Operations {
 
@@ -103,6 +132,19 @@ extension MyFSVolume: FSVolume.Operations {
     }
 
     func activate(options: FSTaskOptions) async throws -> FSItem {
+        // fd2 = open("/Users/vadymh/github/fskit/FSKitSample/test", O_RDONLY | O_DIRECTORY, 0)
+        // self.mount2 = options
+        // self.fd2 = open("/Users/vadymh/github/fskit/FSKitSample/test2", O_RDONLY | O_DIRECTORY, 0)
+        // if self.fd2 < 0 {
+        //     let error = errno
+        //     // logger.error("Failed to open directory: \(path), error: \(error)")
+        //     throw fs_errorForPOSIXError(error)
+        // }
+        self.p = [
+            options.url(forOption: "m"),
+            options.url(forOption: "d"),
+        ]
+
         self.mount3 = options
         var path: String? = nil
         var optionsIter = options.taskOptions.makeIterator()
@@ -142,7 +184,6 @@ extension MyFSVolume: FSVolume.Operations {
     }
 
     func mount(options: FSTaskOptions) async throws {
-        self.mount2 = options
         logger.debug("mount")
     }
 
@@ -158,7 +199,7 @@ extension MyFSVolume: FSVolume.Operations {
         _ desiredAttributes: FSItem.GetAttributesRequest,
         of item: FSItem
     ) async throws -> FSItem.Attributes {
-    
+
         if let item = item as? FSItemProtocol {
             return try item.getAttributes()
         } else {
@@ -196,7 +237,7 @@ extension MyFSVolume: FSVolume.Operations {
     }
 
     func reclaimItem(_ item: FSItem) async throws {
-        // logger.debug("deactivateItem: \(item)")   
+        // logger.debug("deactivateItem: \(item)")
         //todo rm zip archives. Mb use timers and debouncers
         // logger.debug("reclaimItem: \(item)")
     }
@@ -232,6 +273,32 @@ extension MyFSVolume: FSVolume.Operations {
         attributes newAttributes: FSItem.SetAttributesRequest,
         linkContents contents: FSFileName
     ) async throws -> (FSItem, FSFileName) {
+
+        // let dirFD = dup(fd2)
+        // if dirFD == -1 {
+        //     throw fs_errorForPOSIXError(errno)
+        // }
+        // guard let dir = fdopendir(dirFD) else {
+        //     close(dirFD)  // Close the duplicate if fdopendir fails
+        //     throw fs_errorForPOSIXError(errno)
+        // }
+        // rewinddir(dir)
+
+        // defer { closedir(dir) }
+
+        // while let entry = readdir(dir) {
+        //     // Get entry name
+        //     let name = withUnsafePointer(to: entry.pointee.d_name) { ptr in
+        //         String(cString: UnsafeRawPointer(ptr).assumingMemoryBound(to: CChar.self))
+        //     }
+
+        //     // Skip . and ..
+        //     if name == "." || name == ".." {
+        //         continue
+        //     }
+
+        // }
+
         guard let directory = directory as? WriteFSItemProtocol else {
             throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
         }
