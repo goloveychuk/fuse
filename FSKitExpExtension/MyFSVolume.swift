@@ -146,29 +146,36 @@ extension MyFSVolume: FSVolume.Operations {
         ]
 
         self.mount3 = options
-        var path: String? = nil
-        var optionsIter = options.taskOptions.makeIterator()
-        while let option = optionsIter.next() {
-            switch option {
-            case "-m":
-                path = optionsIter.next()
-            default:
-                throw MyError.badMountParams
-            }
-        }
+        // var path: String? = nil
+        // var optionsIter = options.taskOptions.makeIterator()
+        // while let option = optionsIter.next() {
+        //     switch option {
+        //     case "-m":
+        //         path = optionsIter.next()
+        //     default:
+        //         throw MyError.badMountParams
+        //     }
+        // }
 
-        guard let path = path else {
-            throw MyError.badMountParams
-        }
+        // guard let path = path else {
+        //     throw MyError.badMountParams
+        // }
 
         logger.debug("activate")
 
         do {
             let root = try {
-                let data = try Data(contentsOf: URL(filePath: path))
-                let depTree = try DependencyNode.fromJSONData(data)
-                let depFsNode = DependencyFSNodeCreator().buildTree(from: depTree)
-                return depFsNode
+                // let data = try Data(contentsOf: URL(filePath: path))
+                // let depTree = try DependencyNode.fromJSONData(data)
+                // let depFsNode = DependencyFSNodeCreator().buildTree(from: depTree)
+                // return depFsNode
+                let fd = open("/Users/vadymh/github/fskit/FSKitSample/test2", O_RDONLY | O_DIRECTORY, 0)
+                if fd < 0 {
+                    let error = errno
+                    // logger.error("Failed to open directory: \(path), error: \(error)")
+                    throw fs_errorForPOSIXError(error)
+                }
+                return PortalDirFSItem(fileId: .rootDirectory, parentId: .parentOfRoot, dirFD: fd)
             }()
             return root
 

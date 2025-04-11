@@ -89,15 +89,13 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
     let itemType: FSItem.ItemType = .directory
     let parentId: FSItem.Identifier
     private let dirFD: Int32
-    private let dirPath: String
     private var cachedEntries: [String: FSItemProtocol]?
     private let logger = Logger(subsystem: "FSKitExp", category: "PortalDir")
 
-    init(fileId: FSItem.Identifier, parentId: FSItem.Identifier, dirFD: Int32, dirPath: String) {
+    init(fileId: FSItem.Identifier, parentId: FSItem.Identifier, dirFD: Int32) {
         self.fileId = fileId
         self.parentId = parentId
         self.dirFD = dirFD
-        self.dirPath = dirPath
         super.init()
     }
 
@@ -172,24 +170,20 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
                 }
             }
 
-            let itemFD: Int32
-            let childPath = dirPath + "/" + name
-
             if type == .directory {
                 // Open subdirectory with O_DIRECTORY
-                itemFD = openat(dirFD, name, O_RDONLY | O_DIRECTORY, 0)
+                let itemFD = openat(dirFD, name, O_RDONLY | O_DIRECTORY, 0)
                 if itemFD >= 0 {
                     entries[name] = PortalDirFSItem(
-                        fileId: nextID, parentId: fileId, dirFD: itemFD, dirPath: childPath)
+                        fileId: nextID, parentId: fileId, dirFD: itemFD)
                 }
             } else {
                 // Open file
-                itemFD = openat(dirFD, name, O_RDONLY, 0)
-                if itemFD >= 0 {
-                    entries[name] = PortalFileFSItem(
-                        fileId: nextID, parentId: fileId, fd: itemFD, path: childPath,
-                        itemType: type)
-                }
+
+                entries[name] = PortalFileFSItem(
+                    fileId: nextID, parentId: fileId, dirFd: dirFD, fileFd: nil, name: name,
+                    itemType: type)
+
             }
 
             nextID = nextID.advance(by: 1)
@@ -215,7 +209,7 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
             return nil  // File doesn't exist
         }
 
-        let childPath = dirPath + "/" + nameStr
+        // let childPath = dirPath + "/" + nameStr
         let nextID = fileId.advance(by: UInt64(nameStr.hash & 0x7FFF_FFFF))
 
         let type: FSItem.ItemType
@@ -224,22 +218,22 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
             let newFD = openat(dirFD, nameStr, O_RDONLY | O_DIRECTORY, 0)
             if newFD >= 0 {
                 return PortalDirFSItem(
-                    fileId: nextID, parentId: fileId, dirFD: newFD, dirPath: childPath)
+                    fileId: nextID, parentId: fileId, dirFD: newFD)
             }
         } else if (statBuf.st_mode & S_IFMT) == S_IFREG {
             type = .file
-            let newFD = openat(dirFD, nameStr, O_RDONLY, 0)
-            if newFD >= 0 {
-                return PortalFileFSItem(
-                    fileId: nextID, parentId: fileId, fd: newFD, path: childPath, itemType: type)
-            }
+
+            return PortalFileFSItem(
+                fileId: nextID, parentId: fileId, dirFd: dirFD, fileFd: nil, name: nameStr,
+                itemType: type)
+
         } else if (statBuf.st_mode & S_IFMT) == S_IFLNK {
             type = .symlink
-            let newFD = openat(dirFD, nameStr, O_RDONLY | O_NOFOLLOW, 0)
-            if newFD >= 0 {
-                return PortalFileFSItem(
-                    fileId: nextID, parentId: fileId, fd: newFD, path: childPath, itemType: type)
-            }
+
+            return PortalFileFSItem(
+                fileId: nextID, parentId: fileId, dirFd: dirFD, fileFd: nil, name: nameStr,
+                itemType: type)
+
         }
 
         return nil
@@ -268,7 +262,6 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
         attributes.accessTime = statBuf.st_atimespec
         attributes.changeTime = statBuf.st_ctimespec
         attributes.backupTime = statBuf.st_birthtimespec
-    
 
         return attributes
     }
@@ -308,7 +301,8 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
         if newAttributes.isValid(FSItem.Attribute.accessTime)
             || newAttributes.isValid(FSItem.Attribute.modifyTime)
         {
-            var times = [timespec](repeating: timespec(tv_sec: 0, tv_nsec: Int(UTIME_OMIT)), count: 2)
+            var times = [timespec](
+                repeating: timespec(tv_sec: 0, tv_nsec: Int(UTIME_OMIT)), count: 2)
 
             if newAttributes.isValid(FSItem.Attribute.accessTime) {
                 times[0] = newAttributes.accessTime
@@ -432,14 +426,13 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
             }
         }
 
-        // Create the new FSItem
-        let childPath = dirPath + "/" + nameStr
         let itemFD = openat(dirFD, nameStr, O_RDONLY | O_NOFOLLOW, 0)
         let nextID = fileId.advance(by: UInt64(nameStr.hash & 0x7FFF_FFFF))
 
         if itemFD >= 0 {
             let item = PortalFileFSItem(
-                fileId: nextID, parentId: fileId, fd: itemFD, path: childPath, itemType: .symlink)
+                fileId: nextID, parentId: fileId, dirFd: dirFD, fileFd: itemFD, name: nameStr,
+                itemType: .symlink)
 
             // Update cache if needed
             if cachedEntries != nil {
@@ -461,7 +454,6 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
             throw fs_errorForPOSIXError(POSIXError.EINVAL.rawValue)
         }
 
-        let childPath = dirPath + "/" + nameStr
         let nextID = fileId.advance(by: UInt64(nameStr.hash & 0x7FFF_FFFF))
 
         switch type {
@@ -477,7 +469,7 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
             }
 
             let dirItem = PortalDirFSItem(
-                fileId: nextID, parentId: fileId, dirFD: itemFD, dirPath: childPath)
+                fileId: nextID, parentId: fileId, dirFD: itemFD)
 
             // Apply attributes if needed
             if newAttributes.isValid(FSItem.Attribute.uid)
@@ -503,7 +495,8 @@ final class PortalDirFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
             }
 
             let fileItem = PortalFileFSItem(
-                fileId: nextID, parentId: fileId, fd: fd, path: childPath, itemType: .file)
+                fileId: nextID, parentId: fileId, dirFd: dirFD, fileFd: fd, name: nameStr,
+                itemType: .file)
 
             // Apply attributes if needed
             if newAttributes.isValid(FSItem.Attribute.uid)
@@ -531,25 +524,42 @@ final class PortalFileFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
     let fileId: FSItem.Identifier
     let itemType: FSItem.ItemType
     let parentId: FSItem.Identifier
-    private let fd: Int32
-    private let path: String
+    private let dirFd: Int32
+    private var cachedFd: Int32?
+    private let fileName: String
     private let logger = Logger(subsystem: "FSKitExp", category: "PortalFile")
 
     init(
-        fileId: FSItem.Identifier, parentId: FSItem.Identifier, fd: Int32, path: String,
+        fileId: FSItem.Identifier, parentId: FSItem.Identifier, dirFd: Int32, fileFd: Int32?,
+        name: String,
         itemType: FSItem.ItemType
     ) {
         self.fileId = fileId
         self.parentId = parentId
-        self.fd = fd
-        self.path = path
+        self.dirFd = dirFd
+        self.fileName = name
         self.itemType = itemType
+        self.cachedFd = fileFd
         super.init()
     }
 
+    func getFd() throws -> Int32 {
+        guard let cachedFd = cachedFd else {
+            cachedFd = openat(dirFd, fileName, O_RDONLY, 0)
+            if cachedFd == -1 {
+                logger.error(
+                    "Failed to open file descriptor for \(self.fileName)"
+                )
+                throw fs_errorForPOSIXError(errno)
+            }
+            return cachedFd!
+        }
+
+        return cachedFd
+    }
     deinit {
         // Close the file descriptor when this object is deallocated
-        if fd >= 0 {
+        if let fd = cachedFd {
             Darwin.close(fd)
         }
     }
@@ -568,7 +578,7 @@ final class PortalFileFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
 
     func getAttributes() throws -> FSItem.Attributes {
         var statBuf = stat()
-        if fstat(fd, &statBuf) != 0 {
+        if fstat(try getFd(), &statBuf) != 0 {
             throw fs_errorForPOSIXError(errno)
         }
 
@@ -608,13 +618,14 @@ final class PortalFileFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
         }
 
         // Seek to the requested position
-        if lseek(fd, offset, SEEK_SET) == -1 {
+        if lseek(try getFd(), offset, SEEK_SET) == -1 {
             throw fs_errorForPOSIXError(errno)
         }
 
         // Read data
-        return buffer.withUnsafeMutableBytes { bufferPtr in
-            let bytesRead = Darwin.read(fd, bufferPtr.baseAddress, min(length, bufferPtr.count))
+        return try buffer.withUnsafeMutableBytes { bufferPtr in
+            let bytesRead = Darwin.read(
+                try getFd(), bufferPtr.baseAddress, min(length, bufferPtr.count))
             return bytesRead >= 0 ? bytesRead : -1
         }
     }
@@ -629,8 +640,9 @@ final class PortalFileFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
         var buffer = [CChar](repeating: 0, count: bufferSize)
 
         // Read symbolic link
-        let result = Darwin.readlink(path, &buffer, bufferSize)
-        if result == -1 {
+        let result = readlinkat(dirFd, fileName, &buffer, bufferSize)
+        
+        guard result != -1 else {
             throw fs_errorForPOSIXError(errno)
         }
 
@@ -647,7 +659,7 @@ final class PortalFileFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
     func setAttributes(newAttributes: FSItem.SetAttributesRequest) throws -> FSItem.Attributes {
         // Handle permissions
         if newAttributes.isValid(FSItem.Attribute.mode) {
-            if fchmod(fd, mode_t(newAttributes.mode & 0o777)) != 0 {
+            if fchmod(try getFd(), mode_t(newAttributes.mode & 0o777)) != 0 {
                 throw fs_errorForPOSIXError(errno)
             }
         }
@@ -658,14 +670,14 @@ final class PortalFileFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
         {
             let uid = newAttributes.isValid(FSItem.Attribute.uid) ? newAttributes.uid : ~0
             let gid = newAttributes.isValid(FSItem.Attribute.gid) ? newAttributes.gid : ~0
-            if fchown(fd, uid, gid) != 0 {
+            if fchown(try getFd(), uid, gid) != 0 {
                 throw fs_errorForPOSIXError(errno)
             }
         }
 
         // Handle size (truncate)
         if newAttributes.isValid(FSItem.Attribute.size) {
-            if ftruncate(fd, off_t(newAttributes.size)) != 0 {
+            if ftruncate(try getFd(), off_t(newAttributes.size)) != 0 {
                 throw fs_errorForPOSIXError(errno)
             }
         }
@@ -674,7 +686,8 @@ final class PortalFileFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
         if newAttributes.isValid(FSItem.Attribute.accessTime)
             || newAttributes.isValid(FSItem.Attribute.modifyTime)
         {
-            var times = [timespec](repeating: timespec(tv_sec: 0, tv_nsec: Int(UTIME_OMIT)), count: 2)
+            var times = [timespec](
+                repeating: timespec(tv_sec: 0, tv_nsec: Int(UTIME_OMIT)), count: 2)
 
             if newAttributes.isValid(FSItem.Attribute.accessTime) {
                 times[0] = newAttributes.accessTime
@@ -684,7 +697,7 @@ final class PortalFileFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
                 times[1] = newAttributes.modifyTime
             }
 
-            if futimens(fd, times) != 0 {
+            if futimens(try getFd(), times) != 0 {
                 throw fs_errorForPOSIXError(errno)
             }
         }
@@ -699,13 +712,13 @@ final class PortalFileFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
         }
 
         // Seek to the requested position
-        if lseek(fd, offset, SEEK_SET) == -1 {
+        if lseek(try getFd(), offset, SEEK_SET) == -1 {
             throw fs_errorForPOSIXError(errno)
         }
 
         // Write data
-        return contents.withUnsafeBytes { bufferPtr in
-            let bytesWritten = Darwin.write(fd, bufferPtr.baseAddress, bufferPtr.count)
+        return try contents.withUnsafeBytes { bufferPtr in
+            let bytesWritten = Darwin.write(try getFd(), bufferPtr.baseAddress, bufferPtr.count)
             return bytesWritten >= 0 ? bytesWritten : -1
         }
     }
@@ -725,7 +738,7 @@ final class PortalFileFSItem: FSItem, FSItemProtocol, WriteFSItemProtocol {
         // Create hard link from this file to the destination
         // Access the dirFD through a publicly defined method - we'll need to create one
         let dirFD = try destDir.getDirectoryFileDescriptor()
-        if linkat(AT_FDCWD, path, dirFD, destName, 0) != 0 {
+        if linkat(dirFd, fileName, dirFD, destName, 0) != 0 {
             throw fs_errorForPOSIXError(errno)
         }
 
