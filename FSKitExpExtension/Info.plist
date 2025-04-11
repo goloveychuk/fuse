@@ -9,11 +9,13 @@
 		<key>FSActivateOptionSyntax</key>
 		<dict>
 			<key>shortOptions</key>
-			<string>m:</string>
+			<string>m:d:</string>
 			<key>pathOptions</key>
 			<dict>
 				<key>m</key>
-				<string>m</string>
+				<string>Path</string>
+				<key>d</key>
+				<string>Directory</string>
 			</dict>
 		</dict>
 		<key>FSCheckOptionSyntax</key>

@@ -13,5 +13,10 @@
         <!-- Replace the string below with the full path to the directory you want to access -->
         <string>/</string>
     </array>
+	<key>com.apple.security.temporary-exception.files.absolute-path.read-only</key>
+    <array>
+        <!-- Replace the string below with the full path to the directory you want to access -->
+        <string>/</string>
+    </array>
 </dict>
 </plist>
