@@ -12,8 +12,8 @@ import FSKit
 protocol WriteFSItemProtocol: FSItemProtocol {
     func setAttributes(newAttributes: FSItem.SetAttributesRequest) throws -> FSItem.Attributes
     func writeData(contents: Data, offset: off_t) throws -> Int
-    func removeItem(name: FSFileName, fromDirectory: FSItem) throws
-    func createLink(to name: FSFileName, inDirectory: FSItem) throws -> FSFileName
+    func removeItem(name: FSFileName, item: FSItem) throws
+    func createLink(to name: FSFileName, item: FSItem) throws -> FSFileName
     func renameItem(
         inDirectory sourceDirectory: FSItem,
         named sourceName: FSFileName,

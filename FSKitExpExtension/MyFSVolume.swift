@@ -321,10 +321,10 @@ extension MyFSVolume: FSVolume.Operations {
         named name: FSFileName,
         inDirectory directory: FSItem
     ) async throws -> FSFileName {
-        guard let item = item as? WriteFSItemProtocol else {  //todo rm hardlink support?
+        guard let dir = directory as? WriteFSItemProtocol else {  //todo rm hardlink support?
             throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
         }
-        return try item.createLink(to: name, inDirectory: directory)
+        return try dir.createLink(to: name, item: item)
     }
 
     func removeItem(
@@ -332,10 +332,10 @@ extension MyFSVolume: FSVolume.Operations {
         named name: FSFileName,
         fromDirectory directory: FSItem
     ) async throws {
-        guard let item = item as? WriteFSItemProtocol else {
+        guard let dir = directory as? WriteFSItemProtocol else {
             throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
         }
-        return try item.removeItem(name: name, fromDirectory: directory)
+        return try dir.removeItem(name: name, item: item)
     }
 
     func renameItem(
