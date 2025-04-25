@@ -1,19 +1,21 @@
 import { Descriptor, FetchResult, formatUtils, Installer, InstallPackageExtraApi, Linker, LinkOptions, LinkType, Locator, LocatorHash, Manifest, MessageName, MinimalLinkOptions, Package, Project, miscUtils, structUtils, WindowsLinkType, BuildRequest } from '@yarnpkg/core';
 import { Filename, PortablePath, setupCopyIndex, ppath, xfs, DirentNoPath, VirtualFS } from '@yarnpkg/fslib';
+import { ZipOpenFS } from '@yarnpkg/libzip';
 import { jsInstallUtils } from '@yarnpkg/plugin-pnp';
 import { UsageError } from 'clipanion';
 import { FuseNode } from './types';
 import { mountFuse } from './runFuse';
-import fs from 'fs';
+
+interface DependencyData {
+  isWorkspace: boolean;
+  target: PortablePath | null;
+  packageLocation: PortablePath;
+  dependenciesLocation: PortablePath | null;
+  dependenciesLinks?: Map<PortablePath, {relative: PortablePath, absolute: PortablePath}>;
+}
 export type FuseCustomData = {
   locatorByPath: Map<PortablePath, string>;
-  allDependencies: Map<LocatorHash, {
-    isWorkspace: boolean;
-    target: PortablePath | null;
-    packageLocation: PortablePath;
-    dependenciesLocation: PortablePath | null;
-    dependenciesLinks?: Map<string, string>;
-  }>;
+  allDependencies: Map<LocatorHash, DependencyData>;
 };
 
 export class FuseLinker implements Linker {
@@ -172,7 +174,7 @@ class FuseInstaller implements Installer {
     if (isVirtual) {
       realPath = VirtualFS.resolveVirtual(realPath);
     }
-    
+
     this.customData.allDependencies.set(pkg.locatorHash, {
       ...packagePaths,
       isWorkspace: false,
@@ -221,7 +223,7 @@ class FuseInstaller implements Installer {
     if (!dependenciesLocation)
       return;
 
-    const dependenciesLinks = dependencyData.dependenciesLinks = new Map();
+    dependencyData.dependenciesLinks = new Map();
 
     const installDependency = (descriptor: Descriptor, dependency: Locator) => {
       // Downgrade virtual workspaces (cf isPnpmVirtualCompatible's documentation)
@@ -240,7 +242,7 @@ class FuseInstaller implements Installer {
 
       const depLinkPath = ppath.relative(ppath.dirname(depDstPath), depSrcPaths.packageLocation);
 
-      dependenciesLinks.set(name, depLinkPath);
+      dependencyData.dependenciesLinks!.set(name, {relative: depLinkPath, absolute: depSrcPaths.packageLocation});
     }
 
     let hasExplicitSelfDependency = false;
@@ -262,39 +264,12 @@ class FuseInstaller implements Installer {
 
 
   // private async persistDeps() {
-  //   await xfs.mkdirPromise(dependenciesLocation, {recursive: true});
-
-  //   // Retrieve what's currently inside the package's true nm folder. We
-  //   // will use that to figure out what are the extraneous entries we'll
-  //   // need to remove.
-  //   const initialEntries = await getNodeModulesListing(dependenciesLocation);
-  //   const extraneous = new Map(initialEntries);
 
   //   const concurrentPromises: Array<Promise<void>> = [action];
 
   //   const installDependency = (descriptor: Descriptor, dependency: Locator) => {
 
-  //     const existing = extraneous.get(name);
-  //     extraneous.delete(name);
 
-  //     concurrentPromises.push(Promise.resolve().then(async () => {
-  //       // No need to update the symlink if it's already the correct one
-  //       if (existing) {
-  //         if (existing.isSymbolicLink() && await xfs.readlinkPromise(depDstPath) === depLinkPath) {
-  //           return;
-  //         } else {
-  //           await xfs.removePromise(depDstPath);
-  //         }
-  //       }
-
-  //       await xfs.mkdirpPromise(ppath.dirname(depDstPath));
-
-
-  //       if (process.platform == `win32` && this.opts.project.configuration.get(`winLinkType`) === WindowsLinkType.JUNCTIONS) {
-  //         await xfs.symlinkPromise(depSrcPaths.packageLocation, depDstPath, `junction`);
-  //       } else {
-  //         await xfs.symlinkPromise(depLinkPath, depDstPath);
-  //       }
   //     }));
   //   };
 
@@ -304,6 +279,56 @@ class FuseInstaller implements Installer {
   //   await Promise.all(concurrentPromises);
   // }
 
+  private async persistHardDependency(defaultFsLayer: VirtualFS, dependencyData: DependencyData) {
+
+    await xfs.mkdirPromise(dependencyData.packageLocation, { recursive: true });
+    if (dependencyData.target) {
+      //todo mimic nm linker
+      await xfs.copyPromise(dependencyData.packageLocation, dependencyData.target, {
+        baseFs: defaultFsLayer,
+      });
+    }
+    if (!dependencyData.dependenciesLocation) {
+      return
+    }
+    await xfs.mkdirPromise(dependencyData.dependenciesLocation, { recursive: true });
+
+    // Retrieve what's currently inside the package's true nm folder. We
+    // will use that to figure out what are the extraneous entries we'll
+    // need to remove.
+    const initialEntries = await getNodeModulesListing(dependencyData.dependenciesLocation);
+    const extraneous = new Map(initialEntries);
+
+    const concurrentPromises: Array<Promise<void>> = [];
+
+    for (const [name, {absolute, relative}] of dependencyData.dependenciesLinks!) {
+      const depDstPath = ppath.join(dependencyData.dependenciesLocation, name);
+
+      const existing = extraneous.get(name);
+      extraneous.delete(name);
+
+      concurrentPromises.push((async () => {
+        if (existing) {
+          if (existing.isSymbolicLink() && await xfs.readlinkPromise(depDstPath) === relative) {
+            return;
+          } else {
+            await xfs.removePromise(depDstPath);
+          }
+        }
+
+        await xfs.mkdirpPromise(ppath.dirname(depDstPath));
+        if (process.platform == `win32` && this.opts.project.configuration.get(`winLinkType`) === WindowsLinkType.JUNCTIONS) {
+          await xfs.symlinkPromise(absolute, depDstPath, `junction`);
+        } else {
+          await xfs.symlinkPromise(relative, depDstPath);
+        }
+      })());
+    }
+    concurrentPromises.push(cleanNodeModules(dependencyData.dependenciesLocation, extraneous));
+
+    await Promise.all(concurrentPromises);
+  }
+
   async finalizeInstall() {
 
     const fuseData: FuseNode = {
@@ -311,6 +336,13 @@ class FuseInstaller implements Installer {
       linkType: 'HARD',
     }
 
+    const defaultFsLayer = new VirtualFS({
+      baseFs: new ZipOpenFS({
+        maxOpenFiles: 80,
+        readOnlyArchives: true,
+      }),
+    });
+    // const toPersist: DependencyData[] = [];
 
     const mountRoot = getStoreLocation(this.opts.project, { unplugged: false });
 
@@ -318,8 +350,11 @@ class FuseInstaller implements Installer {
       let relative = ppath.relative(mountRoot, dependencyData.packageLocation);
 
       if (relative.startsWith(`..`)) {
-        console.log(`skipping`, relative);
-        continue; //todo persist in fs
+
+        this.asyncActions.set(locatorHash, async () => {
+          await this.persistHardDependency(defaultFsLayer, dependencyData);
+        });
+        continue
       }
 
       const node = getPathNode(fuseData, relative)
@@ -330,8 +365,6 @@ class FuseInstaller implements Installer {
 
       if (!dependencyData.target) {
         throw new Error(`Assertion failed: Expected the package to have target (${JSON.stringify(dependencyData)})`);
-        // console.log('conditional', dependencyData.packageLocation);
-        // throw new Error(`Assertion failed: Expected the package to have target (${JSON.stringify(dependencyData)})`);
       }
 
       Object.assign(node, {
@@ -348,7 +381,7 @@ class FuseInstaller implements Installer {
 
         const nodeModulesNode = getPathNode(fuseData, relative)
         for (const [name, link] of dependencyData.dependenciesLinks!) {
-          const node = getPathNode(nodeModulesNode, name as PortablePath)
+          const node = getPathNode(nodeModulesNode, name)
           Object.assign(node, {
             children: {},
             linkType: 'SOFT',
@@ -365,7 +398,10 @@ class FuseInstaller implements Installer {
 
     await xfs.changeFilePromise(fuseStatePath, JSON.stringify(fuseData), {});
 
-    await mountFuse(mountRoot, fuseStatePath);
+    await Promise.all([
+      this.asyncActions.wait(),
+      mountFuse(mountRoot, fuseStatePath),
+    ]);
 
     return {
       customData: this.customData,
