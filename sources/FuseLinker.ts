@@ -3,7 +3,7 @@ import {Filename, PortablePath, setupCopyIndex, ppath, xfs, DirentNoPath}       
 import {jsInstallUtils}                                                                                                                                                                                                                     from '@yarnpkg/plugin-pnp';
 import {UsageError}                                                                                                                                                                                                                         from 'clipanion';
 
-export type PnpmCustomData = {
+export type FuseCustomData = {
   locatorByPath: Map<PortablePath, string>;
   pathsByLocator: Map<LocatorHash, {
     packageLocation: PortablePath;
@@ -11,11 +11,11 @@ export type PnpmCustomData = {
   }>;
 };
 
-export class PnpmLinker implements Linker {
+export class FuseLinker implements Linker {
   getCustomDataKey() {
     return JSON.stringify({
-      name: `PnpmLinker`,
-      version: 3,
+      name: `FuseLinker`,
+      version: 1,
     });
   }
 
@@ -25,16 +25,16 @@ export class PnpmLinker implements Linker {
 
   async findPackageLocation(locator: Locator, opts: LinkOptions) {
     if (!this.isEnabled(opts))
-      throw new Error(`Assertion failed: Expected the pnpm linker to be enabled`);
+      throw new Error(`Assertion failed: Expected the fuse linker to be enabled`);
 
     const customDataKey = this.getCustomDataKey();
-    const customData = opts.project.linkersCustomData.get(customDataKey) as PnpmCustomData | undefined;
+    const customData = opts.project.linkersCustomData.get(customDataKey) as FuseCustomData | undefined;
     if (!customData)
       throw new UsageError(`The project in ${formatUtils.pretty(opts.project.configuration, `${opts.project.cwd}/package.json`, formatUtils.Type.PATH)} doesn't seem to have been installed - running an install there might help`);
 
     const packagePaths = customData.pathsByLocator.get(locator.locatorHash);
     if (typeof packagePaths === `undefined`)
-      throw new UsageError(`Couldn't find ${structUtils.prettyLocator(opts.project.configuration, locator)} in the currently installed pnpm map - running an install might help`);
+      throw new UsageError(`Couldn't find ${structUtils.prettyLocator(opts.project.configuration, locator)} in the currently installed fuse map - running an install might help`);
 
     return packagePaths.packageLocation;
   }
@@ -72,15 +72,15 @@ export class PnpmLinker implements Linker {
   }
 
   makeInstaller(opts: LinkOptions) {
-    return new PnpmInstaller(opts);
+    return new FuseInstaller(opts);
   }
 
   private isEnabled(opts: MinimalLinkOptions) {
-    return opts.project.configuration.get(`nodeLinker`) === `pnpm`;
+    return opts.project.configuration.get(`nodeLinker`) === `fuse`;
   }
 }
 
-class PnpmInstaller implements Installer {
+class FuseInstaller implements Installer {
   private readonly asyncActions = new miscUtils.AsyncActions(10);
   private readonly indexFolderPromise: Promise<PortablePath>;
 
@@ -90,7 +90,7 @@ class PnpmInstaller implements Installer {
     });
   }
 
-  private customData: PnpmCustomData = {
+  private customData: FuseCustomData = {
     pathsByLocator: new Map(),
     locatorByPath: new Map(),
   };
@@ -170,7 +170,7 @@ class PnpmInstaller implements Installer {
   }
 
   async attachInternalDependencies(locator: Locator, dependencies: Array<[Descriptor, Locator]>) {
-    if (this.opts.project.configuration.get(`nodeLinker`) !== `pnpm`)
+    if (this.opts.project.configuration.get(`nodeLinker`) !== `fuse`)
       return;
 
     // We don't install those packages at all, because they can't be used anyway
@@ -203,7 +203,7 @@ class PnpmInstaller implements Installer {
         // Downgrade virtual workspaces (cf isPnpmVirtualCompatible's documentation)
         let targetDependency = dependency;
         if (!isPnpmVirtualCompatible(dependency, {project: this.opts.project})) {
-          this.opts.report.reportWarningOnce(MessageName.UNNAMED, `The pnpm linker doesn't support providing different versions to workspaces' peer dependencies`);
+          this.opts.report.reportWarningOnce(MessageName.UNNAMED, `The fuse linker doesn't support providing different versions to workspaces' peer dependencies`);
           targetDependency = structUtils.devirtualizeLocator(dependency);
         }
 
@@ -258,13 +258,13 @@ class PnpmInstaller implements Installer {
   }
 
   async attachExternalDependents(locator: Locator, dependentPaths: Array<PortablePath>) {
-    throw new Error(`External dependencies haven't been implemented for the pnpm linker`);
+    throw new Error(`External dependencies haven't been implemented for the fuse linker`);
   }
 
   async finalizeInstall() {
     const storeLocation = getStoreLocation(this.opts.project);
 
-    if (this.opts.project.configuration.get(`nodeLinker`) !== `pnpm`) {
+    if (this.opts.project.configuration.get(`nodeLinker`) !== `fuse`) {
       await xfs.removePromise(storeLocation);
     } else {
       let extraneous: Set<Filename>;
