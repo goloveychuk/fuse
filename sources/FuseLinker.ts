@@ -1,13 +1,17 @@
-import {Descriptor, FetchResult, formatUtils, Installer, InstallPackageExtraApi, Linker, LinkOptions, LinkType, Locator, LocatorHash, Manifest, MessageName, MinimalLinkOptions, Package, Project, miscUtils, structUtils, WindowsLinkType} from '@yarnpkg/core';
-import {Filename, PortablePath, setupCopyIndex, ppath, xfs, DirentNoPath}                                                                                                                                                                   from '@yarnpkg/fslib';
-import {jsInstallUtils}                                                                                                                                                                                                                     from '@yarnpkg/plugin-pnp';
-import {UsageError}                                                                                                                                                                                                                         from 'clipanion';
+import { Descriptor, FetchResult, formatUtils, Installer, InstallPackageExtraApi, Linker, LinkOptions, LinkType, Locator, LocatorHash, Manifest, MessageName, MinimalLinkOptions, Package, Project, miscUtils, structUtils, WindowsLinkType, BuildRequest } from '@yarnpkg/core';
+import { Filename, PortablePath, setupCopyIndex, ppath, xfs, DirentNoPath } from '@yarnpkg/fslib';
+import { jsInstallUtils } from '@yarnpkg/plugin-pnp';
+import { UsageError } from 'clipanion';
+import { FuseNode } from './types';
 
 export type FuseCustomData = {
   locatorByPath: Map<PortablePath, string>;
-  pathsByLocator: Map<LocatorHash, {
+  allDependencies: Map<LocatorHash, {
+    isWorkspace: boolean;
+    target: PortablePath | undefined;
     packageLocation: PortablePath;
     dependenciesLocation: PortablePath | null;
+    dependenciesLinks?: Map<string, string>;
   }>;
 };
 
@@ -32,7 +36,7 @@ export class FuseLinker implements Linker {
     if (!customData)
       throw new UsageError(`The project in ${formatUtils.pretty(opts.project.configuration, `${opts.project.cwd}/package.json`, formatUtils.Type.PATH)} doesn't seem to have been installed - running an install there might help`);
 
-    const packagePaths = customData.pathsByLocator.get(locator.locatorHash);
+    const packagePaths = customData.allDependencies.get(locator.locatorHash);
     if (typeof packagePaths === `undefined`)
       throw new UsageError(`Couldn't find ${structUtils.prettyLocator(opts.project.configuration, locator)} in the currently installed fuse map - running an install might help`);
 
@@ -91,7 +95,7 @@ class FuseInstaller implements Installer {
   }
 
   private customData: FuseCustomData = {
-    pathsByLocator: new Map(),
+    allDependencies: new Map(),
     locatorByPath: new Map(),
   };
 
@@ -112,13 +116,16 @@ class FuseInstaller implements Installer {
   async installPackageSoft(pkg: Package, fetchResult: FetchResult, api: InstallPackageExtraApi) {
     const packageLocation = ppath.resolve(fetchResult.packageFs.getRealPath(), fetchResult.prefixPath);
 
-    const dependenciesLocation = this.opts.project.tryWorkspaceByLocator(pkg)
+    const isWorkspace = this.opts.project.tryWorkspaceByLocator(pkg) !== null;
+    const dependenciesLocation = isWorkspace
       ? ppath.join(packageLocation, Filename.nodeModules)
       : null;
 
-    this.customData.pathsByLocator.set(pkg.locatorHash, {
+    this.customData.allDependencies.set(pkg.locatorHash, {
       packageLocation,
       dependenciesLocation,
+      isWorkspace,
+      target: undefined,
     });
 
     return {
@@ -128,40 +135,45 @@ class FuseInstaller implements Installer {
   }
 
   async installPackageHard(pkg: Package, fetchResult: FetchResult, api: InstallPackageExtraApi) {
-    const packagePaths = getPackagePaths(pkg, {project: this.opts.project});
-    const packageLocation = packagePaths.packageLocation;
-
-    this.customData.locatorByPath.set(packageLocation, structUtils.stringifyLocator(pkg));
-    this.customData.pathsByLocator.set(pkg.locatorHash, packagePaths);
-
-    api.holdFetchResult(this.asyncActions.set(pkg.locatorHash, async () => {
-      await xfs.mkdirPromise(packageLocation, {recursive: true});
-
-      // Copy the package source into the <root>/n_m/.store/<hash> directory, so
-      // that we can then create symbolic links to it later.
-      await xfs.copyPromise(packageLocation, fetchResult.prefixPath, {
-        baseFs: fetchResult.packageFs,
-        overwrite: false,
-        linkStrategy: {
-          type: `HardlinkFromIndex`,
-          indexPath: await this.indexFolderPromise,
-          autoRepair: true,
-        },
-      });
-    }));
-
     const isVirtual = structUtils.isVirtualLocator(pkg);
     const devirtualizedLocator: Locator = isVirtual ? structUtils.devirtualizeLocator(pkg) : pkg;
 
     const buildConfig = {
-      manifest: await Manifest.tryFind(fetchResult.prefixPath, {baseFs: fetchResult.packageFs}) ?? new Manifest(),
+      manifest: await Manifest.tryFind(fetchResult.prefixPath, { baseFs: fetchResult.packageFs }) ?? new Manifest(),
       misc: {
         hasBindingGyp: jsInstallUtils.hasBindingGyp(fetchResult),
       },
     };
 
     const dependencyMeta = this.opts.project.getDependencyMeta(devirtualizedLocator, pkg.version);
-    const buildRequest = jsInstallUtils.extractBuildRequest(pkg, buildConfig, dependencyMeta, {configuration: this.opts.project.configuration});
+    const buildRequest = jsInstallUtils.extractBuildRequest(pkg, buildConfig, dependencyMeta, { configuration: this.opts.project.configuration });
+
+    const packagePaths = getPackagePaths(pkg, { project: this.opts.project, buildRequest });
+    const packageLocation = packagePaths.packageLocation;
+
+    this.customData.locatorByPath.set(packageLocation, structUtils.stringifyLocator(pkg));
+    this.customData.allDependencies.set(pkg.locatorHash, {
+      ...packagePaths,
+      isWorkspace: false,
+      target: ppath.join(fetchResult.packageFs.getRealPath(), fetchResult.prefixPath),
+    });
+
+    // api.holdFetchResult(this.asyncActions.set(pkg.locatorHash, async () => {
+    //   await xfs.mkdirPromise(packageLocation, {recursive: true});
+
+    //   // Copy the package source into the <root>/n_m/.store/<hash> directory, so
+    //   // that we can then create symbolic links to it later.
+    //   await xfs.copyPromise(packageLocation, fetchResult.prefixPath, {
+    //     baseFs: fetchResult.packageFs,
+    //     overwrite: false,
+    //     linkStrategy: {
+    //       type: `HardlinkFromIndex`,
+    //       indexPath: await this.indexFolderPromise,
+    //       autoRepair: true,
+    //     },
+    //   });
+    // }));
+
 
     return {
       packageLocation,
@@ -174,94 +186,168 @@ class FuseInstaller implements Installer {
       return;
 
     // We don't install those packages at all, because they can't be used anyway
-    if (!isPnpmVirtualCompatible(locator, {project: this.opts.project}))
+    if (!isPnpmVirtualCompatible(locator, { project: this.opts.project }))
       return;
 
-    const packagePaths = this.customData.pathsByLocator.get(locator.locatorHash);
-    if (typeof packagePaths === `undefined`)
+    const dependencyData = this.customData.allDependencies.get(locator.locatorHash);
+    if (typeof dependencyData === `undefined`)
       throw new Error(`Assertion failed: Expected the package to have been registered (${structUtils.stringifyLocator(locator)})`);
 
     const {
       dependenciesLocation,
-    } = packagePaths;
+    } = dependencyData;
 
     if (!dependenciesLocation)
       return;
 
-    this.asyncActions.reduce(locator.locatorHash, async action => {
-      await xfs.mkdirPromise(dependenciesLocation, {recursive: true});
+    const dependenciesLinks = dependencyData.dependenciesLinks = new Map();
 
-      // Retrieve what's currently inside the package's true nm folder. We
-      // will use that to figure out what are the extraneous entries we'll
-      // need to remove.
-      const initialEntries = await getNodeModulesListing(dependenciesLocation);
-      const extraneous = new Map(initialEntries);
-
-      const concurrentPromises: Array<Promise<void>> = [action];
-
-      const installDependency = (descriptor: Descriptor, dependency: Locator) => {
-        // Downgrade virtual workspaces (cf isPnpmVirtualCompatible's documentation)
-        let targetDependency = dependency;
-        if (!isPnpmVirtualCompatible(dependency, {project: this.opts.project})) {
-          this.opts.report.reportWarningOnce(MessageName.UNNAMED, `The fuse linker doesn't support providing different versions to workspaces' peer dependencies`);
-          targetDependency = structUtils.devirtualizeLocator(dependency);
-        }
-
-        const depSrcPaths = this.customData.pathsByLocator.get(targetDependency.locatorHash);
-        if (typeof depSrcPaths === `undefined`)
-          throw new Error(`Assertion failed: Expected the package to have been registered (${structUtils.stringifyLocator(dependency)})`);
-
-        const name = structUtils.stringifyIdent(descriptor) as PortablePath;
-        const depDstPath = ppath.join(dependenciesLocation, name);
-
-        const depLinkPath = ppath.relative(ppath.dirname(depDstPath), depSrcPaths.packageLocation);
-
-        const existing = extraneous.get(name);
-        extraneous.delete(name);
-
-        concurrentPromises.push(Promise.resolve().then(async () => {
-          // No need to update the symlink if it's already the correct one
-          if (existing) {
-            if (existing.isSymbolicLink() && await xfs.readlinkPromise(depDstPath) === depLinkPath) {
-              return;
-            } else {
-              await xfs.removePromise(depDstPath);
-            }
-          }
-
-          await xfs.mkdirpPromise(ppath.dirname(depDstPath));
-
-
-          if (process.platform == `win32` && this.opts.project.configuration.get(`winLinkType`) === WindowsLinkType.JUNCTIONS) {
-            await xfs.symlinkPromise(depSrcPaths.packageLocation, depDstPath, `junction`);
-          } else {
-            await xfs.symlinkPromise(depLinkPath, depDstPath);
-          }
-        }));
-      };
-
-      let hasExplicitSelfDependency = false;
-      for (const [descriptor, dependency] of dependencies) {
-        if (descriptor.identHash === locator.identHash)
-          hasExplicitSelfDependency = true;
-
-        installDependency(descriptor, dependency);
+    const installDependency = (descriptor: Descriptor, dependency: Locator) => {
+      // Downgrade virtual workspaces (cf isPnpmVirtualCompatible's documentation)
+      let targetDependency = dependency;
+      if (!isPnpmVirtualCompatible(dependency, { project: this.opts.project })) {
+        this.opts.report.reportWarningOnce(MessageName.UNNAMED, `The fuse linker doesn't support providing different versions to workspaces' peer dependencies`);
+        targetDependency = structUtils.devirtualizeLocator(dependency);
       }
 
-      if (!hasExplicitSelfDependency && !this.opts.project.tryWorkspaceByLocator(locator))
-        installDependency(structUtils.convertLocatorToDescriptor(locator), locator);
+      const depSrcPaths = this.customData.allDependencies.get(targetDependency.locatorHash);
+      if (typeof depSrcPaths === `undefined`)
+        throw new Error(`Assertion failed: Expected the package to have been registered (${structUtils.stringifyLocator(dependency)})`);
 
-      concurrentPromises.push(cleanNodeModules(dependenciesLocation, extraneous));
+      const name = structUtils.stringifyIdent(descriptor) as PortablePath;
 
-      await Promise.all(concurrentPromises);
-    });
+      const depLinkPath = ppath.relative(dependenciesLocation, depSrcPaths.packageLocation);
+      dependenciesLinks.set(name, depLinkPath);
+    }
+
+    let hasExplicitSelfDependency = false;
+    for (const [descriptor, dependency] of dependencies) {
+      if (descriptor.identHash === locator.identHash)
+        hasExplicitSelfDependency = true;
+
+      installDependency(descriptor, dependency);
+    }
+
+    if (!hasExplicitSelfDependency && !this.opts.project.tryWorkspaceByLocator(locator))
+      installDependency(structUtils.convertLocatorToDescriptor(locator), locator);
+
   }
 
   async attachExternalDependents(locator: Locator, dependentPaths: Array<PortablePath>) {
     throw new Error(`External dependencies haven't been implemented for the fuse linker`);
   }
 
+
+  // private async persistDeps() {
+  //   await xfs.mkdirPromise(dependenciesLocation, {recursive: true});
+
+  //   // Retrieve what's currently inside the package's true nm folder. We
+  //   // will use that to figure out what are the extraneous entries we'll
+  //   // need to remove.
+  //   const initialEntries = await getNodeModulesListing(dependenciesLocation);
+  //   const extraneous = new Map(initialEntries);
+
+  //   const concurrentPromises: Array<Promise<void>> = [action];
+
+  //   const installDependency = (descriptor: Descriptor, dependency: Locator) => {
+
+  //     const existing = extraneous.get(name);
+  //     extraneous.delete(name);
+
+  //     concurrentPromises.push(Promise.resolve().then(async () => {
+  //       // No need to update the symlink if it's already the correct one
+  //       if (existing) {
+  //         if (existing.isSymbolicLink() && await xfs.readlinkPromise(depDstPath) === depLinkPath) {
+  //           return;
+  //         } else {
+  //           await xfs.removePromise(depDstPath);
+  //         }
+  //       }
+
+  //       await xfs.mkdirpPromise(ppath.dirname(depDstPath));
+
+
+  //       if (process.platform == `win32` && this.opts.project.configuration.get(`winLinkType`) === WindowsLinkType.JUNCTIONS) {
+  //         await xfs.symlinkPromise(depSrcPaths.packageLocation, depDstPath, `junction`);
+  //       } else {
+  //         await xfs.symlinkPromise(depLinkPath, depDstPath);
+  //       }
+  //     }));
+  //   };
+
+
+  //   concurrentPromises.push(cleanNodeModules(dependenciesLocation, extraneous));
+
+  //   await Promise.all(concurrentPromises);
+  // }
+
   async finalizeInstall() {
+
+    const fuseData: FuseNode = {
+      children: {},
+      linkType: 'HARD',
+    }
+
+    const getPathNode = (path: PortablePath) => {
+      const parts = path.split(ppath.sep);
+      let parent = fuseData;
+      for (const part of parts) {
+        if (!parent.children[part]) {
+          parent.children[part] = {
+            children: {},
+            linkType: 'HARD',
+          }
+        }
+        parent = parent.children[part];
+      }
+      return parent;
+    }
+
+    const mountRoot = getStoreLocation(this.opts.project, { unplugged: false });
+
+    for (const dependencyData of this.customData.allDependencies.values()) {
+      let relative = ppath.relative(mountRoot, dependencyData.packageLocation);
+
+      if (relative.startsWith(`..`)) {
+        console.log(`skipping`, relative);
+        continue; //todo persist in fs
+      }
+
+      let node = getPathNode(relative)
+
+
+
+      if (!dependencyData.target) {
+        throw new Error(`Assertion failed: Expected the package to have been registered (${JSON.stringify(dependencyData)})`);
+      }
+
+      Object.assign(node, {
+        children: {},
+        linkType: 'HARD',
+        target: dependencyData.target,
+      })
+
+      if (dependencyData.dependenciesLocation) {
+        let nodeModules = fuseData;
+        let relative = ppath.relative(mountRoot, dependencyData.dependenciesLocation);
+        if (relative.startsWith(`..`)) {
+          throw new Error(`Assertion failed: Expected the package to have been registered (${JSON.stringify(dependencyData)})`);
+        }
+
+        const nodeModulesNode = getPathNode(relative)
+        for (const [name, link] of dependencyData.dependenciesLinks!) {
+          nodeModulesNode.children[name] = {
+            children: {},
+            linkType: 'SOFT',
+            target: link,
+          }
+        }
+      }
+
+    }
+
+    xfs.writeFileSync(ppath.join(this.opts.project.cwd, `fuse.json`), JSON.stringify(fuseData, null, 2));
+    return
     const storeLocation = getStoreLocation(this.opts.project);
 
     if (this.opts.project.configuration.get(`nodeLinker`) !== `fuse`) {
@@ -274,7 +360,7 @@ class FuseInstaller implements Installer {
         extraneous = new Set();
       }
 
-      for (const {dependenciesLocation} of this.customData.pathsByLocator.values()) {
+      for (const { dependenciesLocation } of this.customData.allDependencies.values()) {
         if (!dependenciesLocation)
           continue;
 
@@ -308,21 +394,27 @@ function getNodeModulesLocation(project: Project) {
   return ppath.join(project.cwd, Filename.nodeModules);
 }
 
-function getStoreLocation(project: Project) {
-  return project.configuration.get(`pnpmStoreFolder`);
+function getStoreLocation(project: Project, { unplugged }: { unplugged: boolean }) {
+  if (unplugged) {
+    return project.configuration.get(`unpluggedFuseStoreFolder`);
+  }
+
+  return project.configuration.get(`fuseStoreFolder`);
 }
 
-function getPackagePaths(locator: Locator, {project}: {project: Project}) {
+
+function getPackagePaths(locator: Locator, { project, buildRequest }: { project: Project, buildRequest: BuildRequest | null }) {
   const pkgKey = structUtils.slugifyLocator(locator);
-  const storeLocation = getStoreLocation(project);
+  const shouldBuild = Boolean(buildRequest && !buildRequest.skipped);
+  const storeLocation = getStoreLocation(project, { unplugged: shouldBuild });
 
   const packageLocation = ppath.join(storeLocation, pkgKey, `package`);
   const dependenciesLocation = ppath.join(storeLocation, pkgKey, Filename.nodeModules);
 
-  return {packageLocation, dependenciesLocation};
+  return { packageLocation, dependenciesLocation };
 }
 
-function isPnpmVirtualCompatible(locator: Locator, {project}: {project: Project}) {
+function isPnpmVirtualCompatible(locator: Locator, { project }: { project: Project }) {
   // The pnpm install strategy has a limitation: because Node would always
   // resolve symbolic path to their true location, and because we can't just
   // copy-paste workspaces like we do with normal dependencies, we can't give
@@ -343,8 +435,8 @@ async function getNodeModulesListing(nmPath: PortablePath) {
 
   let fsListing: Array<DirentNoPath> = [];
   try {
-    fsListing = await xfs.readdirPromise(nmPath, {withFileTypes: true});
-  } catch (err) {
+    fsListing = await xfs.readdirPromise(nmPath, { withFileTypes: true });
+  } catch (err: any) {
     if (err.code !== `ENOENT`) {
       throw err;
     }
@@ -356,7 +448,7 @@ async function getNodeModulesListing(nmPath: PortablePath) {
         continue;
 
       if (entry.name.startsWith(`@`)) {
-        const scopeListing = await xfs.readdirPromise(ppath.join(nmPath, entry.name), {withFileTypes: true});
+        const scopeListing = await xfs.readdirPromise(ppath.join(nmPath, entry.name), { withFileTypes: true });
         if (scopeListing.length === 0) {
           listing.set(entry.name, entry);
         } else {
@@ -368,7 +460,7 @@ async function getNodeModulesListing(nmPath: PortablePath) {
         listing.set(entry.name, entry);
       }
     }
-  } catch (err) {
+  } catch (err: any) {
     if (err.code !== `ENOENT`) {
       throw err;
     }
@@ -398,7 +490,7 @@ async function cleanNodeModules(nmPath: PortablePath, extraneous: Map<PortablePa
 async function removeIfEmpty(dir: PortablePath) {
   try {
     await xfs.rmdirPromise(dir);
-  } catch (error) {
+  } catch (error: any) {
     if (error.code !== `ENOENT` && error.code !== `ENOTEMPTY`) {
       throw error;
     }

@@ -169,7 +169,8 @@ enum DependencyNode: Decodable {
                     }
                     self = .zip(zipInfo: (zipPath: zipPath, subpath: subpath), children: children)
                 } else {
-                    self = .dirPortal(target: targetPath, children: children)
+                    throw MyError.badManifest("Dir portal is not supported")
+                    // self = .dirPortal(target: targetPath, children: children)
                 }
             } else {
                 self = .nestedDir(children: children)
