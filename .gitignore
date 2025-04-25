@@ -9,6 +9,14 @@ xcuserdata/
 .dist
 test
 test2
+bundles
+node_modules
+
+**/.yarn/install-state.gz
+**/.yarn/fuse-state.json
+yarn-fuse
+fuse/output/
+
 ## compatibility with Xcode 8 and earlier (ignoring not required starting Xcode 9)
 *.xcscmblueprint
 *.xccheckout

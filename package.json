@@ -1,0 +1,18 @@
+{
+  "name": "yarn-plugin-fuse",
+  "main": "./sources/index.ts",
+  "dependencies": {
+    "@types/node": "^18.0.0",
+    "@yarnpkg/builder": "^4.0.0",
+    "@yarnpkg/cli": "^4.0.0",
+    "@yarnpkg/core": "^4.0.0",
+    "execa": "^8.0.1",
+    "typescript": "^5.0.0"
+  },
+  "scripts": {
+    "build": "tsc --noEmit && builder build plugin",
+    "dev": "builder build plugin --no-minify --source-map",
+    "test": "cd example && yarn install && yarn test"
+  },
+  "packageManager": "yarn@4.1.0"
+}
