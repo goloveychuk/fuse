@@ -263,22 +263,6 @@ class FuseInstaller implements Installer {
   }
 
 
-  // private async persistDeps() {
-
-  //   const concurrentPromises: Array<Promise<void>> = [action];
-
-  //   const installDependency = (descriptor: Descriptor, dependency: Locator) => {
-
-
-  //     }));
-  //   };
-
-
-  //   concurrentPromises.push(cleanNodeModules(dependenciesLocation, extraneous));
-
-  //   await Promise.all(concurrentPromises);
-  // }
-
   private async persistHardDependency(defaultFsLayer: VirtualFS, dependencyData: DependencyData) {
 
     await xfs.mkdirPromise(dependencyData.packageLocation, { recursive: true });
@@ -325,7 +309,6 @@ class FuseInstaller implements Installer {
       })());
     }
     concurrentPromises.push(cleanNodeModules(dependencyData.dependenciesLocation, extraneous));
-
     await Promise.all(concurrentPromises);
   }
 
@@ -403,11 +386,8 @@ class FuseInstaller implements Installer {
       mountFuse(mountRoot, fuseStatePath),
     ]);
 
-    return {
-      customData: this.customData,
-    };
 
-    const storeLocation = getStoreLocation(this.opts.project);
+    const storeLocation = getStoreLocation(this.opts.project, { unplugged: true });
 
     if (this.opts.project.configuration.get(`nodeLinker`) !== `fuse`) {
       await xfs.removePromise(storeLocation);
@@ -443,7 +423,9 @@ class FuseInstaller implements Installer {
     if (this.opts.project.configuration.get(`nodeLinker`) !== `node-modules`)
       await removeIfEmpty(getNodeModulesLocation(this.opts.project));
 
-
+    return {
+      customData: this.customData,
+    };
   }
 }
 
