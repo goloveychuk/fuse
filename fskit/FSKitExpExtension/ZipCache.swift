@@ -11,18 +11,37 @@ enum LinkType: String, Decodable {
 }
 
 // Define custom errors for dependency operations
-enum MyError: Error {
+
+enum MyError: Error, LocalizedError, CustomNSError {
     case badManifest(String)
     case badMountParams
-
-    var localizedDescription: String {
+    
+    var errorDescription: String? {
         switch self {
         case .badManifest(let err):
             return "Bad manifest: \(err)"
         case .badMountParams:
             return "Bad mount parameters"
         }
-
+    }
+    
+    // var failureReason: String? {
+    //     switch self {
+    //     case .badManifest(let err):
+    //         return "Bad manifest: \(err)"
+    //     case .badMountParams:
+    //         return "Bad mount parameters"   
+    //     }
+    // }
+    
+    // CustomNSError implementation
+    // static var errorDomain: String { return "FSKitExpExtension.MyError" }
+    
+    var errorUserInfo: [String: Any] {
+        return [
+            NSLocalizedDescriptionKey: errorDescription ?? "",
+            NSLocalizedFailureReasonErrorKey: failureReason ?? ""
+        ]
     }
 }
 
@@ -155,8 +174,10 @@ enum DependencyNode: Decodable {
 
             // Validate children paths
             for (key, _) in children {
-                guard !key.contains("/") else {
-                    throw MyError.badManifest("PathSegment cannot contain '/' or '.'")
+                // Check that the key (path segment) is a valid file or directory name
+                // and doesn't contain nested path components
+                if key.contains("/") {
+                    throw MyError.badManifest("Invalid path segment: '\(key)'. Path segments should not contain nested paths.")
                 }
             }
 

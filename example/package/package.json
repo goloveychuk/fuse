@@ -2,6 +2,7 @@
     "name": "package",
     "dependencies": {
         "decompress-response": "^6.0.0",
+        "esbuild": "^0.19.0",
         "lodash": "^4.17.21",
         "mimic-response": "^1.0.0",
         "otherpackage": "1.0.0",

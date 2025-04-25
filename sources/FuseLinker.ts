@@ -1,14 +1,15 @@
 import { Descriptor, FetchResult, formatUtils, Installer, InstallPackageExtraApi, Linker, LinkOptions, LinkType, Locator, LocatorHash, Manifest, MessageName, MinimalLinkOptions, Package, Project, miscUtils, structUtils, WindowsLinkType, BuildRequest } from '@yarnpkg/core';
-import { Filename, PortablePath, setupCopyIndex, ppath, xfs, DirentNoPath } from '@yarnpkg/fslib';
+import { Filename, PortablePath, setupCopyIndex, ppath, xfs, DirentNoPath, VirtualFS } from '@yarnpkg/fslib';
 import { jsInstallUtils } from '@yarnpkg/plugin-pnp';
 import { UsageError } from 'clipanion';
 import { FuseNode } from './types';
-
+import { mountFuse } from './runFuse';
+import fs from 'fs';
 export type FuseCustomData = {
   locatorByPath: Map<PortablePath, string>;
   allDependencies: Map<LocatorHash, {
     isWorkspace: boolean;
-    target: PortablePath | undefined;
+    target: PortablePath | null;
     packageLocation: PortablePath;
     dependenciesLocation: PortablePath | null;
     dependenciesLinks?: Map<string, string>;
@@ -84,6 +85,21 @@ export class FuseLinker implements Linker {
   }
 }
 
+const getPathNode = (start: FuseNode, path: PortablePath) => {
+  const parts = path.split(ppath.sep);
+  let parent = start;
+  for (const part of parts) {
+    if (!parent.children[part]) {
+      parent.children[part] = {
+        children: {},
+        linkType: 'HARD',
+      }
+    }
+    parent = parent.children[part];
+  }
+  return parent;
+}
+
 class FuseInstaller implements Installer {
   private readonly asyncActions = new miscUtils.AsyncActions(10);
   private readonly indexFolderPromise: Promise<PortablePath>;
@@ -125,7 +141,7 @@ class FuseInstaller implements Installer {
       packageLocation,
       dependenciesLocation,
       isWorkspace,
-      target: undefined,
+      target: null,
     });
 
     return {
@@ -152,10 +168,15 @@ class FuseInstaller implements Installer {
     const packageLocation = packagePaths.packageLocation;
 
     this.customData.locatorByPath.set(packageLocation, structUtils.stringifyLocator(pkg));
+    let realPath = fetchResult.packageFs.getRealPath();
+    if (isVirtual) {
+      realPath = VirtualFS.resolveVirtual(realPath);
+    }
+    
     this.customData.allDependencies.set(pkg.locatorHash, {
       ...packagePaths,
       isWorkspace: false,
-      target: ppath.join(fetchResult.packageFs.getRealPath(), fetchResult.prefixPath),
+      target: xfs.existsSync(realPath) ? ppath.join(realPath, fetchResult.prefixPath) : null // for conditional dependencies
     });
 
     // api.holdFetchResult(this.asyncActions.set(pkg.locatorHash, async () => {
@@ -215,8 +236,10 @@ class FuseInstaller implements Installer {
         throw new Error(`Assertion failed: Expected the package to have been registered (${structUtils.stringifyLocator(dependency)})`);
 
       const name = structUtils.stringifyIdent(descriptor) as PortablePath;
+      const depDstPath = ppath.join(dependenciesLocation, name);
 
-      const depLinkPath = ppath.relative(dependenciesLocation, depSrcPaths.packageLocation);
+      const depLinkPath = ppath.relative(ppath.dirname(depDstPath), depSrcPaths.packageLocation);
+
       dependenciesLinks.set(name, depLinkPath);
     }
 
@@ -288,24 +311,10 @@ class FuseInstaller implements Installer {
       linkType: 'HARD',
     }
 
-    const getPathNode = (path: PortablePath) => {
-      const parts = path.split(ppath.sep);
-      let parent = fuseData;
-      for (const part of parts) {
-        if (!parent.children[part]) {
-          parent.children[part] = {
-            children: {},
-            linkType: 'HARD',
-          }
-        }
-        parent = parent.children[part];
-      }
-      return parent;
-    }
 
     const mountRoot = getStoreLocation(this.opts.project, { unplugged: false });
 
-    for (const dependencyData of this.customData.allDependencies.values()) {
+    for (const [locatorHash, dependencyData] of this.customData.allDependencies) {
       let relative = ppath.relative(mountRoot, dependencyData.packageLocation);
 
       if (relative.startsWith(`..`)) {
@@ -313,12 +322,16 @@ class FuseInstaller implements Installer {
         continue; //todo persist in fs
       }
 
-      let node = getPathNode(relative)
+      const node = getPathNode(fuseData, relative)
 
-
+      if (this.opts.project.disabledLocators.has(locatorHash)) {
+        continue
+      }
 
       if (!dependencyData.target) {
-        throw new Error(`Assertion failed: Expected the package to have been registered (${JSON.stringify(dependencyData)})`);
+        throw new Error(`Assertion failed: Expected the package to have target (${JSON.stringify(dependencyData)})`);
+        // console.log('conditional', dependencyData.packageLocation);
+        // throw new Error(`Assertion failed: Expected the package to have target (${JSON.stringify(dependencyData)})`);
       }
 
       Object.assign(node, {
@@ -328,26 +341,36 @@ class FuseInstaller implements Installer {
       })
 
       if (dependencyData.dependenciesLocation) {
-        let nodeModules = fuseData;
-        let relative = ppath.relative(mountRoot, dependencyData.dependenciesLocation);
+        const relative = ppath.relative(mountRoot, dependencyData.dependenciesLocation);
         if (relative.startsWith(`..`)) {
           throw new Error(`Assertion failed: Expected the package to have been registered (${JSON.stringify(dependencyData)})`);
         }
 
-        const nodeModulesNode = getPathNode(relative)
+        const nodeModulesNode = getPathNode(fuseData, relative)
         for (const [name, link] of dependencyData.dependenciesLinks!) {
-          nodeModulesNode.children[name] = {
+          const node = getPathNode(nodeModulesNode, name as PortablePath)
+          Object.assign(node, {
             children: {},
             linkType: 'SOFT',
             target: link,
-          }
+          })
         }
       }
-
     }
 
-    xfs.writeFileSync(ppath.join(this.opts.project.cwd, `fuse.json`), JSON.stringify(fuseData, null, 2));
-    return
+    const fuseStatePath = ppath.join(
+      this.opts.project.cwd,
+      `.yarn/fuse-state.json`,
+    );
+
+    await xfs.changeFilePromise(fuseStatePath, JSON.stringify(fuseData), {});
+
+    await mountFuse(mountRoot, fuseStatePath);
+
+    return {
+      customData: this.customData,
+    };
+
     const storeLocation = getStoreLocation(this.opts.project);
 
     if (this.opts.project.configuration.get(`nodeLinker`) !== `fuse`) {
@@ -384,9 +407,7 @@ class FuseInstaller implements Installer {
     if (this.opts.project.configuration.get(`nodeLinker`) !== `node-modules`)
       await removeIfEmpty(getNodeModulesLocation(this.opts.project));
 
-    return {
-      customData: this.customData,
-    };
+
   }
 }
 

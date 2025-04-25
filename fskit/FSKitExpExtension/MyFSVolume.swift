@@ -140,22 +140,23 @@ extension MyFSVolume: FSVolume.Operations {
         //     // logger.error("Failed to open directory: \(path), error: \(error)")
         //     throw fs_errorForPOSIXError(error)
         // }
-        // self.p = [
-        //     options.url(forOption: "m"),
-        //     options.url(forOption: "d"),
-        // ]
+        self.p = [
+            options.url(forOption: "m"),
+            options.url(forOption: "d"),
+        ]
 
         // self.mount3 = options
         var path: String? = nil
-        var optionsIter = options.taskOptions.makeIterator()
-        while let option = optionsIter.next() {
-            switch option {
-            case "-m":
-                path = optionsIter.next()
-            default:
-                throw MyError.badMountParams
-            }
-        }
+        path = "/Users/vadymh/github/fskit/FSKitSample/example/.yarn/fuse-state.json"
+        // var optionsIter = options.taskOptions.makeIterator()
+        // while let option = optionsIter.next() {
+        //     switch option {
+        //     case "-m":
+        //         path = optionsIter.next()
+        //     default:
+        //         throw MyError.badMountParams
+        //     }
+        // }
 
         guard let path = path else {
             throw MyError.badMountParams

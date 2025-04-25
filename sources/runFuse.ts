@@ -1,12 +1,12 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { pipeline } from 'stream/promises';
 import { setInterval } from 'timers/promises';
 import { xfs, ppath, PortablePath } from '@yarnpkg/fslib';
 import { getExecFileName } from '../utils.mjs';
-import metadata from '../fuse/output/metadata.json';
+// import metadata from '../fuse/output/metadata.json';
 import { fileURLToPath } from 'url';
 import * as os from 'os';
 import * as https from 'https';
@@ -70,41 +70,45 @@ async function downloadFileOrCache(url: string): Promise<string> {
   throw new Error('Not implemented');
 }
 
-export async function runFuse(nmPath: PortablePath, confPath: string) {
-  if (await xfs.existsPromise(nmPath)) {
+export async function mountFuse(mountRoot: PortablePath, confPath: string) {
+  if (await xfs.existsPromise(mountRoot)) {
     // df -h /tmp/Volume
-    spawn('umount', [nmPath], {
+    spawn('umount', [mountRoot], {
       // detached: true,
       stdio: 'inherit',
     });
   } else {
-    await xfs.mkdirpPromise(nmPath);
+    await xfs.mkdirpPromise(mountRoot);
   }
-  spawn('mount', ['-F', '-t', 'MyFS', '-o', `-m=${confPath}`, '/dev/disk5', nmPath], {
+  const result = spawnSync('mount', ['-F', '-t', 'MyFS', '-o', `-m=${confPath}`, '/dev/disk5', mountRoot], {
     // detached: true,
     stdio: 'inherit',
   });
+  console.log(result);
+  // if (result.status !== 0) { //does not work on macos
+  //   throw new Error(`Failed to mount fuse: ${result.stderr}`);
+  // }
   return
-  const name = getExecFileName() as keyof typeof metadata;
-  const meta = metadata[name];
-  if (!meta) {
-    throw new Error(`No checksum found for ${name}`);
-  }
-  const filePath = new URL(meta.path);
-  let realFilePath: string;
-  if (filePath.protocol === 'file:') {
-    realFilePath = fileURLToPath(filePath);
-  } else {
-    realFilePath = await downloadFileOrCache(filePath.href);
-  }
-  await checkChecksum(realFilePath, meta.checksum);
-  const child = spawn(realFilePath, [confPath], {
-    detached: true,
-    stdio: 'inherit',
-  });
-  child.unref();
+  // const name = getExecFileName() as keyof typeof metadata;
+  // const meta = metadata[name];
+  // if (!meta) {
+  //   throw new Error(`No checksum found for ${name}`);
+  // }
+  // const filePath = new URL(meta.path);
+  // let realFilePath: string;
+  // if (filePath.protocol === 'file:') {
+  //   realFilePath = fileURLToPath(filePath);
+  // } else {
+  //   realFilePath = await downloadFileOrCache(filePath.href);
+  // }
+  // await checkChecksum(realFilePath, meta.checksum);
+  // const child = spawn(realFilePath, [confPath], {
+  //   detached: true,
+  //   stdio: 'inherit',
+  // });
+  // child.unref();
 
-  await waitToMount(nmPath);
+  // await waitToMount(nmPath);
 
   // await api.waitToInit();
 }
