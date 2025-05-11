@@ -252,11 +252,7 @@ extension MyFSVolume: FSVolume.Operations {
         _ newAttributes: FSItem.SetAttributesRequest,
         on item: FSItem
     ) async throws -> FSItem.Attributes {
-        guard let item = item as? WriteFSItemProtocol else {
-            throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
-        }
-
-        return try item.setAttributes(newAttributes: newAttributes)
+        throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
     }
 
     func lookupItem(
@@ -297,14 +293,7 @@ extension MyFSVolume: FSVolume.Operations {
         inDirectory directory: FSItem,
         attributes newAttributes: FSItem.SetAttributesRequest
     ) async throws -> (FSItem, FSFileName) {
-        guard let directory = directory as? WriteFSItemProtocol else {
-            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
-        }
-        return try directory.createItem(
-            named: name,
-            type: type,
-            attributes: newAttributes
-        )
+        throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
     }
 
     func createSymbolicLink(
@@ -339,14 +328,8 @@ extension MyFSVolume: FSVolume.Operations {
 
         // }
 
-        guard let directory = directory as? WriteFSItemProtocol else {
-            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
-        }
-        return try directory.createSymbolicLink(
-            named: name,
-            attributes: newAttributes,
-            linkContents: contents
-        )
+            throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
+
     }
 
     func createLink(
@@ -354,10 +337,7 @@ extension MyFSVolume: FSVolume.Operations {
         named name: FSFileName,
         inDirectory directory: FSItem
     ) async throws -> FSFileName {
-        guard let dir = directory as? WriteFSItemProtocol else {  //todo rm hardlink support?
-            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
-        }
-        return try dir.createLink(to: name, item: item)
+        throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
     }
 
     func removeItem(
@@ -365,10 +345,7 @@ extension MyFSVolume: FSVolume.Operations {
         named name: FSFileName,
         fromDirectory directory: FSItem
     ) async throws {
-        guard let dir = directory as? WriteFSItemProtocol else {
-            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
-        }
-        return try dir.removeItem(name: name, item: item)
+        throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
     }
 
     func renameItem(
@@ -379,16 +356,7 @@ extension MyFSVolume: FSVolume.Operations {
         inDirectory destinationDirectory: FSItem,
         overItem: FSItem?
     ) async throws -> FSFileName {
-        guard let item = item as? WriteFSItemProtocol else {
-            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
-        }
-        return try item.renameItem(
-            inDirectory: sourceDirectory,
-            named: sourceName,
-            to: destinationName,
-            inDirectory: destinationDirectory,
-            overItem: overItem
-        )
+        throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
     }
 
     func enumerateDirectory(
@@ -461,9 +429,10 @@ extension MyFSVolume: FSVolume.ReadWriteOperations {
     }
 
     func write(contents: Data, to item: FSItem, at offset: off_t) async throws -> Int {
-        guard let item = item as? WriteFSItemProtocol else {
-            throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
-        }
-        return try item.writeData(contents: contents, offset: offset)
+        throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
+        // guard let item = item as? WriteFSItemProtocol else {
+        //     throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
+        // }
+        // return try item.writeData(contents: contents, offset: offset)
     }
 }
