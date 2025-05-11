@@ -10,10 +10,12 @@ let package = Package(
     ],
     targets: [
         // .target(name: "clibfuse",  dependencies: [], publicHeadersPath: "libfuse"),
-        .systemLibrary(name: "clibfuse", pkgConfig: "fuse3", providers: [
-            // .brew(["osxfuse"]),
-            .apt(["libfuse3-dev"]),
-        ]),
+        .systemLibrary(name: "clibfuse", pkgConfig: "fuse3", 
+            providers: [
+                // .brew(["osxfuse"]),
+                .apt(["fuse3"]),    
+            ],
+        ),
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
         .executableTarget(

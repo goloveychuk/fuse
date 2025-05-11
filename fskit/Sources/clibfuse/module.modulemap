@@ -1,4 +1,3 @@
-module fuse3 {
-    umbrella header "fuse3.h"
-    link "fuse3"
+module clibfuse {
+    umbrella header "clibfuse.h"
 }
