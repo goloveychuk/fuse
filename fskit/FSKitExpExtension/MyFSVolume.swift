@@ -9,6 +9,38 @@ import FSKit
 import Foundation
 import os
 
+extension FSItem.GetAttributesRequest {
+    var printRequestedAttributes: String {
+        var result = ""
+        let map = [
+            "type": FSItem.Attribute.type,
+            "mode": FSItem.Attribute.mode,
+            "linkCount": FSItem.Attribute.linkCount,
+            "uid": FSItem.Attribute.uid,
+            "gid": FSItem.Attribute.gid,
+            "flags": FSItem.Attribute.flags,
+            "size": FSItem.Attribute.size,
+            "allocSize": FSItem.Attribute.allocSize,
+            "fileID": FSItem.Attribute.fileID,
+            "parentID": FSItem.Attribute.parentID,
+            "accessTime": FSItem.Attribute.accessTime,
+            "modifyTime": FSItem.Attribute.modifyTime,
+            "changeTime": FSItem.Attribute.changeTime,
+            "birthTime": FSItem.Attribute.birthTime,
+            "backupTime": FSItem.Attribute.backupTime,
+            "addedTime": FSItem.Attribute.addedTime,
+            "supportsLimitedXAttrs": FSItem.Attribute.supportsLimitedXAttrs,
+            "inhibitKernelOffloadedIO": FSItem.Attribute.inhibitKernelOffloadedIO,
+        ]
+        for (key, value) in map {
+            if self.isAttributeWanted(value) {
+                result += "\(key), "
+            }
+        }
+        return result
+    }
+}
+
 // func readDirectoryEntriesUsingGetdirentries(fd: Int32) throws -> [(
 //     name: String, type: FSItem.ItemType
 // )] {
@@ -88,14 +120,14 @@ extension MyFSVolume: FSVolume.PathConfOperations {
     }
 }
 
-extension MyFSVolume: FSVolume.ItemDeactivation {
-    var itemDeactivationPolicy: FSVolume.ItemDeactivationOptions {
-        return ItemDeactivationOptions.always
-    }
-    func deactivateItem(_ item: FSItem) async throws {
-        // logger.debug("deactivateItem: \(item)")
-    }
-}
+// extension MyFSVolume: FSVolume.ItemDeactivation {
+//     var itemDeactivationPolicy: FSVolume.ItemDeactivationOptions {
+//         return ItemDeactivationOptions.always
+//     }
+//     func deactivateItem(_ item: FSItem) async throws {
+//         // logger.debug("deactivateItem: \(item)")
+//     }
+// }
 
 extension MyFSVolume: FSVolume.Operations {
 
@@ -147,16 +179,16 @@ extension MyFSVolume: FSVolume.Operations {
 
         // self.mount3 = options
         var path: String? = nil
-        path = "/Users/vadymh/github/fskit/FSKitSample/example/.yarn/fuse-state.json"
-        // var optionsIter = options.taskOptions.makeIterator()
-        // while let option = optionsIter.next() {
-        //     switch option {
-        //     case "-m":
-        //         path = optionsIter.next()
-        //     default:
-        //         throw MyError.badMountParams
-        //     }
-        // }
+        // path = "/Users/vadymh/github/fskit/FSKitSample/example/.yarn/fuse-state.json"
+        var optionsIter = options.taskOptions.makeIterator()
+        while let option = optionsIter.next() {
+            switch option {
+            case "-m":
+                path = optionsIter.next()
+            default:
+                throw MyError.badMountParams
+            }
+        }
 
         guard let path = path else {
             throw MyError.badMountParams
@@ -370,6 +402,7 @@ extension MyFSVolume: FSVolume.Operations {
         guard let directory = directory as? FSItemProtocol else {
             throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
         }
+        let attributes = req?.printRequestedAttributes ?? ""
 
         var idx = 0
         for (name, item) in try directory.getChildren() {
@@ -377,6 +410,7 @@ extension MyFSVolume: FSVolume.Operations {
                 idx += 1
                 continue
             }
+
             let attributes = req != nil ? try item.getAttributes() : nil  //todo requested attributes?
             let ok = packer.packEntry(
                 name: name,

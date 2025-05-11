@@ -6,6 +6,10 @@ import { UsageError } from 'clipanion';
 import { FuseNode } from './types';
 import { mountFuse } from './runFuse';
 
+function assign(node: FuseNode, data: FuseNode) {
+  Object.assign(node, data);
+} 
+
 interface DependencyData {
   isWorkspace: boolean;
   target: PortablePath | null;
@@ -340,7 +344,6 @@ class FuseInstaller implements Installer {
         continue
       }
 
-      const node = getPathNode(fuseData, relative)
 
       if (this.opts.project.disabledLocators.has(locatorHash)) {
         continue
@@ -350,7 +353,9 @@ class FuseInstaller implements Installer {
         throw new Error(`Assertion failed: Expected the package to have target (${JSON.stringify(dependencyData)})`);
       }
 
-      Object.assign(node, {
+      const node = getPathNode(fuseData, relative)
+
+      assign(node, {
         children: {},
         linkType: 'HARD',
         target: dependencyData.target,
@@ -365,10 +370,10 @@ class FuseInstaller implements Installer {
         const nodeModulesNode = getPathNode(fuseData, relative)
         for (const [name, link] of dependencyData.dependenciesLinks!) {
           const node = getPathNode(nodeModulesNode, name)
-          Object.assign(node, {
+          assign(node, {
             children: {},
             linkType: 'SOFT',
-            target: link,
+            target: link.relative,
           })
         }
       }

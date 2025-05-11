@@ -17,12 +17,12 @@ const plugin: Plugin = {
     fuseStoreFolder: {
       description: `By default, the store is stored in the 'node_modules/.store' of the project. Sometimes in CI scenario's it is convenient to store this in a different location so it can be cached and reused.`,
       type: SettingsType.ABSOLUTE_PATH,
-      default: `./node_modules/.store`,
+      default: `./node_modules/.store-fuse`,
     },
     unpluggedFuseStoreFolder: {
       description: `By default, the store is stored in the 'node_modules/.store-unplugged' of the project. Sometimes in CI scenario's it is convenient to store this in a different location so it can be cached and reused.`,
       type: SettingsType.ABSOLUTE_PATH,
-      default: `./node_modules/.store-unplugged`,
+      default: `./node_modules/.store-fuse-unplugged`,
     },
   },
   linkers: [
