@@ -8,17 +8,15 @@ let package = Package(
     platforms: [
         .macOS("15.4"),
     ],
-    products: [
-        // Products define the executables and libraries a package produces, making them visible to other packages.
-        .library(
-            name: "FSKitExpExtension",
-            targets: ["FSKitExpExtension"],
-        ),
-    ],
     targets: [
+        // .target(name: "clibfuse",  dependencies: [], publicHeadersPath: "libfuse"),
+        .systemLibrary(name: "clibfuse", pkgConfig: "fuse3", providers: [
+            // .brew(["osxfuse"]),
+            .apt(["libfuse3-dev"]),
+        ]),
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
-        .target(
-            name: "FSKitExpExtension", path: "FSKitExpExtension",),
+        .executableTarget(
+            name: "Fuse", dependencies: ["clibfuse"]),
     ]
 )

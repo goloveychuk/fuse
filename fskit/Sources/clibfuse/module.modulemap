@@ -1,0 +1,4 @@
+module fuse3 {
+    umbrella header "fuse3.h"
+    link "fuse3"
+}

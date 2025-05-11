@@ -17,6 +17,42 @@
             "outFiles": [
                 "${workspaceFolder}/bundles/**"
             ]
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:FSKitSample}/fskit",
+            "name": "Debug fuse (fskit)",
+            "program": "${workspaceFolder:FSKitSample}/fskit/.build/debug/fuse",
+            "preLaunchTask": "swift: Build Debug fuse (fskit)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:FSKitSample}/fskit",
+            "name": "Release fuse (fskit)",
+            "program": "${workspaceFolder:FSKitSample}/fskit/.build/release/fuse",
+            "preLaunchTask": "swift: Build Release fuse (fskit)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:FSKitSample}/fskit",
+            "name": "Debug Fuse (fskit)",
+            "program": "${workspaceFolder:FSKitSample}/fskit/.build/debug/Fuse",
+            "preLaunchTask": "swift: Build Debug Fuse (fskit)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:FSKitSample}/fskit",
+            "name": "Release Fuse (fskit)",
+            "program": "${workspaceFolder:FSKitSample}/fskit/.build/release/Fuse",
+            "preLaunchTask": "swift: Build Release Fuse (fskit)"
         }
     ]
 }
