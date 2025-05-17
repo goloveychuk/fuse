@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import FSKit
 enum ZipError: Error {
@@ -6,6 +5,85 @@ enum ZipError: Error {
     case unsupportedZipFeature(String)
     case zipArchiveInconsistent
     case invalidListing(String)
+}
+
+struct Indexed<T> {
+    typealias Key = FSFileName
+
+    private var items: [Data: T] = [:]
+
+    init() {
+        self.items = [:]
+    }
+
+    func entries() -> [(Key, T)] {
+        return items.map { (FSFileName(data: $0.key), $0.value) }
+    }
+
+    // private func findIndex(for key: Key) -> Int? {
+    //     var low = 0
+    //     var high = items.count - 1
+
+    //     while low <= high {
+    //         let mid = (low + high) / 2
+    //         let midKey = items[mid].0
+
+    //         if midKey == key {
+    //             return mid
+    //         } else if midKey < key {
+    //             low = mid + 1
+    //         } else {
+    //             high = mid - 1
+    //         }
+    //     }
+
+    //     return nil
+    // }
+
+    // private func insertionPoint(for key: Key) -> Int {
+    //     var low = 0
+    //     var high = items.count - 1
+
+    //     while low <= high {
+    //         let mid = (low + high) / 2
+
+    //         if items[mid].0 < key {
+    //             low = mid + 1
+    //         } else {
+    //             high = mid - 1
+    //         }
+    //     }
+
+    //     return low
+    // }
+
+    subscript(index: Key) -> T? {
+        return items[index.data]
+        // if let foundIndex = findIndex(for: index) {
+        //     return items[foundIndex].1
+        // }
+        // return nil
+    }
+
+    subscript(index: Key) -> T {
+        get {
+            return items[index.data]!
+
+            // if let foundIndex = findIndex(for: index) {
+            //     return items[foundIndex].1
+            // }
+            // fatalError("Index not found")
+        }
+        set(newValue) {
+            items[index.data] = newValue
+            // if let existingIndex = findIndex(for: index) {
+            //     items[existingIndex] = (index, newValue)
+            // } else {
+            //     let insertAt = insertionPoint(for: index)
+            //     items.insert((index, newValue), at: insertAt)
+            // }
+        }
+    }
 }
 
 extension Data {
@@ -60,14 +138,14 @@ struct ZipEntry {  //todo minimal
     let isSymbolicLink: Bool
     let crc: UInt32
     let compressedSize: UInt32
-    let linuxAttributes: UInt16
+    let linuxAttributes: mode_t
     let mtime: Date
     let localHeaderOffset: UInt32
 }
 
-typealias Permissions = UInt16
+typealias Permissions = mode_t
 extension Permissions {
-    init(fromUnsafe: UInt16) {
+    init(fromUnsafe: mode_t) {
         self = Permissions(fromUnsafe & 0b111_111_111) // getting standard rwx permissions
     }
 }
@@ -494,7 +572,7 @@ class ListableZip {
             // +----------------------+---------------+
             //      (high 16 bits)      (low 16 bits)
 
-            let linuxAttributes = UInt16(externalAttributes >> 16) //todo check if linux
+            let linuxAttributes = mode_t(externalAttributes >> 16) //todo check if linux
 
             let isSymbolicLink =
                 os == ZIP_UNIX && (linuxAttributes & S_IFMT) == S_IFLNK  //todo check UInt16()
