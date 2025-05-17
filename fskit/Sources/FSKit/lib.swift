@@ -5,6 +5,13 @@ public class FSFileName {
     public init(data: Data) {
         self.data = data
     }
+    public var string: String? {
+        return String(data: data, encoding: .utf8)
+    }
+    public convenience init(string name: String) {
+        self.init(data: name.data(using: .utf8)!)
+    }
+
 }
 
 
@@ -12,85 +19,102 @@ open class FSItem : NSObject {
     
 }
 
+public func fs_errorForPOSIXError(_: Int32) -> any Error {
+
+    return NSError(domain: "domain", code: 0, userInfo: nil)
+}
+
+
+
+open class FSMutableFileDataBuffer : NSObject {
+    // open var length: Int { get }
+    public func withUnsafeMutableBytes<R, E>(_ body: (UnsafeMutableRawBufferPointer) throws(E) -> R) throws(E) -> R where E : Error {
+        //todo
+        return try body(UnsafeMutableRawBufferPointer.allocate(byteCount: 0, alignment: 0))
+    }
+
+}
+
+
 extension FSItem {
 
     /// Attributes of an item, such as size, creation and modification times, and user and group identifiers.
-    // open class Attributes : NSObject, NSSecureCoding {
+    open class Attributes : NSObject {
 
-    //     /// Marks all attributes inactive.
-    //     open func invalidateAllProperties()
+        /// Marks all attributes inactive.
+        // open func invalidateAllProperties()
 
-    //     /// The user identifier.
-    //     open var uid: UInt32
+        /// The user identifier.
+        open var uid: UInt32 = 0
 
-    //     /// The group identifier.
-    //     open var gid: UInt32
+        /// The group identifier.
+        open var gid: UInt32 = 0
 
-    //     /// The mode of the item.
-    //     ///
-    //     /// The mode is often used for `setuid`, `setgid`, and `sticky` bits.
-    //     open var mode: UInt32
+        /// The mode of the item.
+        ///
+        /// The mode is often used for `setuid`, `setgid`, and `sticky` bits.
+        open var mode: UInt32 = 0
 
-    //     /// The item type, such as a regular file, directory, or symbolic link.
-    //     open var type: FSItem.ItemType
+        /// The item type, such as a regular file, directory, or symbolic link.
+        open var type: FSItem.ItemType = .unknown
 
-    //     /// The number of hard links to the item.
-    //     open var linkCount: UInt32
+        /// The number of hard links to the item.
+        open var linkCount: UInt32 = 0
 
-    //     /// The item's behavior flags.
-    //     ///
-    //     /// See `st_flags` in `stat.h` for flag definitions.
-    //     open var flags: UInt32
+        /// The item's behavior flags.
+        ///
+        /// See `st_flags` in `stat.h` for flag definitions.
+        open var flags: UInt32 = 0
 
-    //     /// The item's size.
-    //     open var size: UInt64
+        /// The item's size.
+        open var size: UInt64 = 0
 
-    //     /// The item's allocated size.
-    //     open var allocSize: UInt64
+        /// The item's allocated size.
+        open var allocSize: UInt64 = 0
 
-    //     /// The item's file identifier.
-    //     open var fileID: FSItem.Identifier
+        /// The item's file identifier.
+        open var fileID: FSItem.Identifier = .invalid
 
-    //     /// The identifier of the item's parent.
-    //     open var parentID: FSItem.Identifier
+        /// The identifier of the item's parent.
+        open var parentID: FSItem.Identifier = .invalid
 
-    //     /// A Boolean value that indicates whether the item supports a limited set of extended attributes.
-    //     open var supportsLimitedXAttrs: Bool
+        /// A Boolean value that indicates whether the item supports a limited set of extended attributes.
+        open var supportsLimitedXAttrs: Bool = false
 
-    //     /// A Boolean value that indicates whether the file system overrides the per-volume settings for kernel offloaded I/O for a specific file.
-    //     ///
-    //     /// This property has no meaning if the volume doesn't conform to ``FSVolumeKernelOffloadedIOOperations``.
-    //     open var inhibitKernelOffloadedIO: Bool
+        /// A Boolean value that indicates whether the file system overrides the per-volume settings for kernel offloaded I/O for a specific file.
+        ///
+        /// This property has no meaning if the volume doesn't conform to ``FSVolumeKernelOffloadedIOOperations``.
+        open var inhibitKernelOffloadedIO: Bool = false
 
-    //     /// The item's last-modified time.
-    //     ///
-    //     /// This property represents `mtime`, the last time the item's contents changed.
-    //     open var modifyTime: timespec
+        /// The item's last-modified time.
+        ///
+        /// This property represents `mtime`, the last time the item's contents changed.
+        open var modifyTime: timespec = timespec()
 
-    //     /// The item's added time.
-    //     ///
-    //     /// This property represents the time the file system added the item to its parent directory.
-    //     open var addedTime: timespec
+        /// The item's added time.
+        ///
+        /// This property represents the time the file system added the item to its parent directory.
+        open var addedTime: timespec = timespec()
 
-    //     /// The item's last-changed time.
-    //     ///
-    //     /// This property represents `ctime`, the last time the item's metadata changed.
-    //     open var changeTime: timespec
+        /// The item's last-changed time.
+        ///
+        /// This property represents `ctime`, the last time the item's metadata changed.
+        open var changeTime: timespec = timespec()
 
-    //     /// The item's last-accessed time.
-    //     open var accessTime: timespec
+        /// The item's last-accessed time.
+        open var accessTime: timespec = timespec()
 
-    //     /// The item's creation time.
-    //     open var birthTime: timespec
+        /// The item's creation time.
+        open var birthTime: timespec = timespec()
 
-    //     /// The item's last-backup time.
-    //     open var backupTime: timespec
+        /// The item's last-backup time.
+        open var backupTime: timespec = timespec()
 
-    //     /// Returns a Boolean value that indicates whether the attribute is valid.
-    //     ///
-    //     /// If the value returned by this method is `YES` (Objective-C) or `true` (Swift), a caller can safely use the given attribute.
-    //     open func isValid(_ attribute: FSItem.Attribute) -> Bool
-    // }
+        /// Returns a Boolean value that indicates whether the attribute is valid.
+        ///
+        /// If the value returned by this method is `YES` (Objective-C) or `true` (Swift), a caller can safely use the given attribute.
+        // open func isValid(_ attribute: FSItem.Attribute) -> Bool
+    }
 
     /// A request to set attributes on an item.
     ///
