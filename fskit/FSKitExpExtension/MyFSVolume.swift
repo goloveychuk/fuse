@@ -198,10 +198,7 @@ extension MyFSVolume: FSVolume.Operations {
 
         do {
             let root = try {
-                let data = try Data(contentsOf: URL(filePath: path))
-                let depTree = try DependencyNode.fromJSONData(data)
-                let depFsNode = DependencyFSNodeCreator().buildTree(from: depTree)
-                return depFsNode
+                return try self.createRootNode()
                 // let fd = open("/Users/vadymh/work/responsive-editor2/node_modules", O_RDONLY | O_DIRECTORY, 0)
                 // if fd < 0 {
                 //     let error = errno
