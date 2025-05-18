@@ -321,7 +321,7 @@ func main() throws {
         let packer = PlusPacker(req: req, bufSize: size)
 
         do {
-            let attrReq = FSItem.GetAttributesRequest()
+            let attrReq = FSItem.GetAttributesRequest([.fileID, .mode, .linkCount, .size]) //todo
             let _ = try context.fileSystem.enumerateDirectory(
                 dirNode, startingAt: off, verifier: FSDirectoryVerifier(0), attributes: attrReq,
                 packer: packer)

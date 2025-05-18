@@ -146,82 +146,84 @@ extension FSItem {
     // ///
     // /// Methods that retrieve attributes use this type and inspect the ``wantedAttributes`` property to determine which attributes to provide. FSKit calls the ``isAttributeWanted(_:)`` method to determine whether the request requires a given attribute.
     open class GetAttributesRequest : NSObject {
-
+        
         /// The attributes requested by the request.
         ///
         /// This property is a bit field in Objective-C and an <doc://com.apple.documentation/documentation/Swift/OptionSet> in Swift.
-        // open var wantedAttributes: FSItem.Attribute
+        public let wantedAttributes: FSItem.Attribute
+
+        public init(_ wantedAttributes: FSItem.Attribute) {
+            self.wantedAttributes = wantedAttributes
+        }
 
         /// A method that indicates whether the request wants given attribute.
         ///
         /// - Parameter attribute: The ``FSItemAttribute`` to check.
         open func isAttributeWanted(_ attribute: FSItem.Attribute) -> Bool {
-            return false //todo
+            return wantedAttributes.contains(attribute)
         }
     }
 
 
-    public struct Attribute : OptionSet, @unchecked Sendable {
+    public struct Attribute : OptionSet, Sendable  {
         public let rawValue: Int
         public init(rawValue: Int) {
             self.rawValue = rawValue
         }
-        
+        /// The type attribute.
+        public static let type = Attribute(rawValue: 1 << 0)
+
+        /// The mode attribute.
+        public static let mode = Attribute(rawValue: 1 << 1)
+
+        /// The link count attribute.
+        public static let linkCount = Attribute(rawValue: 1 << 2)
+
+        /// The user ID (uid) attribute.
+        public static let uid = Attribute(rawValue: 1 << 3)
+
+        /// The group ID (gid) attribute.
+        public static let gid = Attribute(rawValue: 1 << 4)
+
+        /// The flags attribute.
+        public static let flags = Attribute(rawValue: 1 << 5)
+
+        /// The size attribute.
+        public static let size = Attribute(rawValue: 1 << 6)
+
+        /// The allocated size attribute.
+        public static let allocSize = Attribute(rawValue: 1 << 7)
+
+        /// The file ID attribute.
+        public static let fileID = Attribute(rawValue: 1 << 8)
+
+        /// The parent ID attribute.
+        public static let parentID = Attribute(rawValue: 1 << 9)
+
+        /// The last-accessed time attribute.
+        public static let accessTime = Attribute(rawValue: 1 << 10)
+
+        /// The last-modified time attribute.
+        public static let modifyTime = Attribute(rawValue: 1 << 11)
+
+        /// The last-changed time attribute.
+        public static let changeTime = Attribute(rawValue: 1 << 12)
+
+        /// The creation time attribute.
+        public static let birthTime = Attribute(rawValue: 1 << 13)
+
+        /// The backup time attribute.
+        public static let backupTime = Attribute(rawValue: 1 << 14)
+
+        /// The time added attribute.
+        public static let addedTime = Attribute(rawValue: 1 << 15)
+
+        /// The supports limited extended attributes attribute.
+        public static let supportsLimitedXAttrs = Attribute(rawValue: 1 << 16)
+
+        /// The inhibit kernel offloaded I/O attribute.
+        public static let inhibitKernelOffloadedIO = Attribute(rawValue: 1 << 17)
     }
-    //     /// The type attribute.
-    //     public static var type: FSItem.Attribute { get }
-
-    //     /// The mode attribute.
-    //     public static var mode: FSItem.Attribute { get }
-
-    //     /// The link count attribute.
-    //     public static var linkCount: FSItem.Attribute { get }
-
-    //     /// The user ID (uid) attribute.
-    //     public static var uid: FSItem.Attribute { get }
-
-    //     /// The group ID (gid) attribute.
-    //     public static var gid: FSItem.Attribute { get }
-
-    //     /// The flags attribute.
-    //     public static var flags: FSItem.Attribute { get }
-
-    //     /// The size attribute.
-    //     public static var size: FSItem.Attribute { get }
-
-    //     /// The allocated size attribute.
-    //     public static var allocSize: FSItem.Attribute { get }
-
-    //     /// The file ID attribute.
-    //     public static var fileID: FSItem.Attribute { get }
-
-    //     /// The parent ID attribute.
-    //     public static var parentID: FSItem.Attribute { get }
-
-    //     /// The last-accessed time attribute.
-    //     public static var accessTime: FSItem.Attribute { get }
-
-    //     /// The last-modified time attribute.
-    //     public static var modifyTime: FSItem.Attribute { get }
-
-    //     /// The last-changed time attribute.
-    //     public static var changeTime: FSItem.Attribute { get }
-
-    //     /// The creation time attribute.
-    //     public static var birthTime: FSItem.Attribute { get }
-
-    //     /// The backup time attribute.
-    //     public static var backupTime: FSItem.Attribute { get }
-
-    //     /// The time added attribute.
-    //     public static var addedTime: FSItem.Attribute { get }
-
-    //     /// The supports limited extended attributes attribute.
-    //     public static var supportsLimitedXAttrs: FSItem.Attribute { get }
-
-    //     /// The inhibit kernel offloaded I/O attribute.
-    //     public static var inhibitKernelOffloadedIO: FSItem.Attribute { get }
-    // }
 
     /// An enumeration of item types, such as file, directory, or symbolic link.
     public enum ItemType : Int, @unchecked Sendable {
