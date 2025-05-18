@@ -19,6 +19,11 @@ public class FileSystem {
         packer: FSDirectoryEntryPacker
     )  throws -> FSDirectoryVerifier {
 
+        // https://developer.apple.com/documentation/fskit/fsvolume/operations/enumeratedirectory(_:startingat:verifier:attributes:packer:replyhandler:)?language=objc
+        // If the attributes parameter is nil, include at least two entries in a directory: "." and "..", 
+        // which represent the current and parent directories, respectively. Both of these items have type FSItemTypeDirectory. 
+        // For the root directory, "." and ".." have identical contents. Don’t pack "." and ".." if attributes isn’t nil.
+
         guard let directory = directory as? FSItemProtocol else {
             throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
         }

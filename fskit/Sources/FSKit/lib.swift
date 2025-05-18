@@ -272,7 +272,7 @@ extension FSDirectoryCookie {
 
 //     /// The constant initial value for the directory-enumeration cookie.
 //     @available(macOS 15.4, *)
-    // public static let initial: FSDirectoryCookie = 2
+    public static let initial: FSDirectoryCookie = 0
 }
 
 public protocol FSDirectoryEntryPacker  {

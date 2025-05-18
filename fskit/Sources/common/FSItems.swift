@@ -139,6 +139,7 @@ enum DependencyNode: Decodable {
 
 public protocol FSItemProtocol: FSItem {
     var fileId: FSItem.Identifier { get }
+    var parentId: FSItem.Identifier { get }
     var itemType: FSItem.ItemType { get }
 
     func getChildren() throws -> [(FSFileName, FSItemProtocol)]
@@ -173,7 +174,7 @@ private let gid = getgid()
 final class ZipFSNode: FSItem, FSItemProtocol {
     private let cachedZip: CachedZip
     private let zipId: ZipID
-    private let parentId: FSItem.Identifier
+    let parentId: FSItem.Identifier
     let fileId: FSItem.Identifier
 
     var itemType: FSItem.ItemType {
@@ -389,7 +390,7 @@ final class DependencyFSNodeCreator {
 final class SoftDependencyFSNode: FSItem, FSItemProtocol {
     private let data: SoftLinkData
     let itemType: FSItem.ItemType = .symlink
-    private let parentId: FSItem.Identifier
+    let parentId: FSItem.Identifier
     let fileId: FSItem.Identifier
 
     init(fileId: FSItem.Identifier, parentId: FSItem.Identifier, data: SoftLinkData) {
@@ -430,7 +431,7 @@ class HardDependencyFSNode: FSItem, FSItemProtocol {
     let fileId: FSItem.Identifier
     let itemType: FSItem.ItemType = .directory
     internal let children: [PathSegment: FSItemProtocol]
-    internal let parentId: FSItem.Identifier
+    let parentId: FSItem.Identifier
 
     init(
         fileId: FSItem.Identifier, parentId: FSItem.Identifier,
