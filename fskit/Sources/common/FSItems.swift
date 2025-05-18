@@ -137,7 +137,7 @@ enum DependencyNode: Decodable {
     }
 }
 
-protocol FSItemProtocol: FSItem {
+public protocol FSItemProtocol: FSItem {
     var fileId: FSItem.Identifier { get }
     var itemType: FSItem.ItemType { get }
 

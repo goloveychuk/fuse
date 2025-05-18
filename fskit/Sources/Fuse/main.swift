@@ -213,11 +213,73 @@ import common
 // }
 
 class Context {
-    var rootNode: FSItem?
+    var rootNode: FSItemProtocol!
+    var fileSystem: FileSystem!
 }
 
 let context = Context()
+let TIMEOUT = 10_000_000.0
 
+class PlusPacker: FSDirectoryEntryPacker {
+    private let allBuf: UnsafeMutablePointer<Int8>
+    private let allBufSize: Int
+    private var bufused: size_t = 0
+    private let req: fuse_req_t?
+
+    init(req: fuse_req_t?, bufSize: Int) {
+        allBufSize = bufSize
+        self.req = req
+        allBuf = UnsafeMutablePointer<Int8>.allocate(capacity: Int(bufSize))
+    }
+
+    func packEntry(
+        name filename: FSFileName, itemType: FSItem.ItemType, itemID: FSItem.Identifier,
+        nextCookie: FSDirectoryCookie, attributes: FSItem.Attributes?
+    ) -> Bool {
+        print ("packEntry: \(filename.string ?? "")")
+        let remaining = allBufSize - bufused
+        // check remaining?
+        guard let name = filename.string else {
+            // todo warn
+            return true
+        }
+
+        var entryParam = fuse_entry_param()
+        memset(&entryParam, 0, MemoryLayout<fuse_entry_param>.size)
+
+        if name == "." || name == ".." {
+            entryParam.attr.st_ino = ino_t(itemID.rawValue)
+            entryParam.attr.st_mode = attributes!.mode
+        } else {
+            // todo lookup_node=
+            entryParam.ino = fuse_ino_t(itemID.rawValue)
+            entryParam.attr.st_ino = ino_t(itemID.rawValue)
+            entryParam.attr.st_mode = attributes!.mode
+            entryParam.attr.st_nlink = attributes!.linkCount
+            entryParam.attr.st_size = Int(attributes!.size)  //todo all attr conv
+            entryParam.attr_timeout = TIMEOUT
+            entryParam.entry_timeout = TIMEOUT
+        }
+
+        let entrySize = name.withCString { cName in
+            fuse_add_direntry_plus(
+                req, allBuf.advanced(by: bufused), remaining, cName, &entryParam, nextCookie+2)
+        }
+        if entrySize > remaining {
+            // todo do_forget() because I got ino
+            // Entry doesn't fit, stop here
+            return false
+        }
+        bufused += entrySize
+        return true
+    }
+    func getBuf() -> (buf: UnsafeMutablePointer<Int8>, used: size_t) {
+        return (buf: allBuf, used: bufused)
+    }
+    deinit {
+        allBuf.deallocate()
+    }
+}
 
 @MainActor
 func main() throws {
@@ -247,162 +309,55 @@ func main() throws {
     }
     operations.readdirplus = { (req, ino, size, off, fi) in
         // Only support root directory (ino == 1)
-        let TIMEOUT = 10_000_000.0;
-
+        print("readdirplus: ino=\(ino), size=\(size), off=\(off)")
         guard ino == 1 else {
             fuse_reply_err(req, ENOENT)
             return
         }
-
+        let dirNode = context.rootNode!
+        // context.rootNode.getChildren()
         // Hardcoded directory entries
-        let entries: [(name: String, ino: UInt64, mode: mode_t)] = [
-            (".", 1, S_IFDIR),
-            ("..", 1, S_IFDIR),
-            ("file1.txt", 2, S_IFREG)
-        ]
 
-        // Helper to fill a single direntry
-        func fillDirEntry(buf: UnsafeMutableRawPointer?, bufsize: size_t, name: String, ino: UInt64, mode: mode_t, off: off_t) -> size_t {
-            var entryParam = fuse_entry_param()
-            memset(&entryParam, 0, MemoryLayout<fuse_entry_param>.size)
+        let packer = PlusPacker(req: req, bufSize: size)
 
-            if (name == "." || name == "..") {
-                entryParam.attr.st_ino = ino_t(ino)
-                entryParam.attr.st_mode = mode | (mode == S_IFDIR ? 0o755 : 0o644)
+        do {
+            var hasCap = true
+            var offDIff = 0
+            if off < 1 {
+                hasCap = packer.packEntry(
+                    name: FSFileName(string: "."), itemType: .directory, itemID: dirNode.fileId,
+                    nextCookie: FSDirectoryCookie(-1), attributes: try dirNode.getAttributes())
             } else {
-                // todo lookup_node=  
-                entryParam.ino = fuse_ino_t(ino)
-                entryParam.attr.st_ino = ino_t(ino)
-                entryParam.attr.st_mode = mode | (mode == S_IFDIR ? 0o755 : 0o644)
-                entryParam.attr.st_nlink = mode == S_IFDIR ? 2 : 1
-                entryParam.attr.st_size = mode == S_IFDIR ? 0 : 5004  // Dummy file size
-                entryParam.attr_timeout = TIMEOUT
-                entryParam.entry_timeout = TIMEOUT    
+                offDIff += 1
             }
-            
-            // let cName = strdup(name)
-            // defer { free(cName) }
-            return name.withCString { cName in
-                fuse_add_direntry_plus(req, buf, bufsize, cName, &entryParam, off)
-            } 
-        }
+            if off < 2 {
+                if hasCap {
+                    let parentNode = dirNode  //todo
+                    hasCap = packer.packEntry(
+                        name: FSFileName(string: ".."), itemType: .directory,
+                        itemID: parentNode.fileId, nextCookie: FSDirectoryCookie(0),
+                        attributes: try parentNode.getAttributes())
+                }
+            } else {
+                offDIff += 1
+            }
 
-        // Allocate buffer
-        let buf = UnsafeMutablePointer<Int8>.allocate(capacity: Int(size))
-        // let buf = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<Int8>.alignment)
-        defer { buf.deallocate() }
-
-        var bufused: size_t = 0
-        var idx = Int(off)
-
-        // Guard against out-of-bounds index
-        guard idx < entries.count else {
-            // No more entries to return
-            fuse_reply_buf(req, buf, 0)
+            if hasCap {
+                let attrReq = FSItem.GetAttributesRequest()
+                let _ = try context.fileSystem.enumerateDirectory(
+                    dirNode, startingAt: off - offDIff, verifier: FSDirectoryVerifier(0), attributes: attrReq,
+                    packer: packer)
+            }
+        } catch {
+            print("Error enumerating directory: \(error)")
+            fuse_reply_err(req, EIO)
             return
         }
 
-        while idx < entries.count {
-            let entry = entries[idx]
-            let remaining = size - bufused
-            
-            // First check if there's any space left before calculating entry size
-            if remaining == 0 {
-                break
-            }
-            
-            // Calculate the size this entry would take
-            let entrySize = fillDirEntry(
-                buf: buf.advanced(by: Int(bufused)),
-                bufsize: remaining,
-                name: entry.name,
-                ino: entry.ino,
-                mode: entry.mode,
-                off: off_t(idx + 1)
-            )
-            
-            // Check if the entry actually fits in the remaining buffer
-            if entrySize > remaining {
-                // todo do_forget() because I got ino
-                // Entry doesn't fit, stop here
-                break
-            }
-            
-            // Entry fits, update buffer position and continue
-            bufused += entrySize
-            idx += 1
-        }
-
-        // print("Debug: Buffer used \(bufused), size \(size), entries \(entries.count), idx \(idx)")
-        // let debugData = Data(bytes: buf, count: bufused)
-        // let hexDump = debugData.map { String(format: "%02x", $0) }.joined(separator: " ")
-        // print("Debug: Buffer used \(bufused) bytes, hex dump: \(hexDump)")
-        fuse_reply_buf(req, buf, bufused)
+        let buf = packer.getBuf()
+        fuse_reply_buf(req, buf.buf, buf.used)
     }
-    // operations.readdirplus = { (req, ino, size, off, fi) in
-    //     print("readdirplus: ino=\(ino), size=\(size), off=\(off)")
 
-    //     // Define hardcoded directory entries
-    //     let entries: [(name: String, ino: UInt64, type: UInt32)] = [
-    //         (".", ino, S_IFDIR),
-    //         ("..", 1, S_IFDIR),
-    //         ("file1.txt", 2, S_IFREG),
-    //     ]
-
-    //     // Create a buffer for the directory entries
-    //     let bufSize = size
-    //     let buffer = UnsafeMutablePointer<Int8>.allocate(capacity: Int(bufSize))
-    //     defer { buffer.deallocate() }
-
-    //     var bufPos: size_t = 0
-    //     var nextOff = off
-
-    //     // Add entries to the buffer
-    //     for (idx, entry) in entries.enumerated() {
-    //         if idx < Int(off) {
-    //             continue
-    //         }
-
-    //         // Skip if we've already filled the buffer
-    //         if bufPos >= bufSize {
-    //             break
-    //         }
-
-    //         // Prepare the entry parameters
-    //         var entryParam = fuse_entry_param()
-    //         entryParam.ino = fuse_ino_t(entry.ino)
-    //         entryParam.attr.st_ino = ino_t(entry.ino)
-    //         entryParam.attr.st_mode = entry.type == S_IFDIR ? S_IFDIR | 0o755 : S_IFREG | 0o644
-    //         entryParam.attr.st_nlink = entry.type == S_IFDIR ? 2 : 1
-    //         entryParam.attr.st_size = entry.type == S_IFDIR ? 0 : 1024  // Dummy file size
-    //         entryParam.attr_timeout = 1.0
-    //         entryParam.entry_timeout = 1.0
-
-    //         // Convert name to C string
-    //         let cName = strdup(entry.name)
-    //         defer { free(cName) }
-
-    //         // Calculate how much space this entry will take
-    //         let entrySize = fuse_add_direntry_plus(
-    //             req,
-    //             buffer.advanced(by: Int(bufPos)),
-    //             bufSize - bufPos,
-    //             cName,
-    //             &entryParam,
-    //             off_t(0)
-    //         )
-
-    //         // If it doesn't fit, stop here
-    //         if bufPos + entrySize > bufSize {
-    //             break
-    //         }
-
-    //         nextOff = off_t(idx + 1)
-    //     }
-
-    //     // Reply with the filled buffer
-    //     fuse_reply_buf(req, buffer, bufPos)
-    // }
     // operations.readdir = ll_readdir
     // operations.forget = ll_forget
     // operations.open = ll_open
@@ -412,7 +367,9 @@ func main() throws {
     let mountPoint = "/tmp/fuse-mount3"
 
     let fs = FileSystem()
-    context.rootNode = try fs.createRootNode(manifestPath: "/workspaces/FSKitSample/fuse-state.json")
+    context.fileSystem = fs
+    context.rootNode = try fs.createRootNode(
+        manifestPath: "/workspaces/FSKitSample/fuse-state.json")
 
     // Create mount point if needed
     let fileManager = FileManager.default
@@ -492,6 +449,7 @@ func main() throws {
     for arg in cArgs where arg != nil {
         free(arg)
     }
+    exit(ret)
 
     // print("FUSE filesystem exited with status: \(result)")
 }

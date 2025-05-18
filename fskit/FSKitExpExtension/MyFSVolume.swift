@@ -9,37 +9,37 @@ import FSKit
 import Foundation
 import os
 
-extension FSItem.GetAttributesRequest {
-    var printRequestedAttributes: String {
-        var result = ""
-        let map = [
-            "type": FSItem.Attribute.type,
-            "mode": FSItem.Attribute.mode,
-            "linkCount": FSItem.Attribute.linkCount,
-            "uid": FSItem.Attribute.uid,
-            "gid": FSItem.Attribute.gid,
-            "flags": FSItem.Attribute.flags,
-            "size": FSItem.Attribute.size,
-            "allocSize": FSItem.Attribute.allocSize,
-            "fileID": FSItem.Attribute.fileID,
-            "parentID": FSItem.Attribute.parentID,
-            "accessTime": FSItem.Attribute.accessTime,
-            "modifyTime": FSItem.Attribute.modifyTime,
-            "changeTime": FSItem.Attribute.changeTime,
-            "birthTime": FSItem.Attribute.birthTime,
-            "backupTime": FSItem.Attribute.backupTime,
-            "addedTime": FSItem.Attribute.addedTime,
-            "supportsLimitedXAttrs": FSItem.Attribute.supportsLimitedXAttrs,
-            "inhibitKernelOffloadedIO": FSItem.Attribute.inhibitKernelOffloadedIO,
-        ]
-        for (key, value) in map {
-            if self.isAttributeWanted(value) {
-                result += "\(key), "
-            }
-        }
-        return result
-    }
-}
+// extension FSItem.GetAttributesRequest {
+//     var printRequestedAttributes: String {
+//         var result = ""
+//         let map = [
+//             "type": FSItem.Attribute.type,
+//             "mode": FSItem.Attribute.mode,
+//             "linkCount": FSItem.Attribute.linkCount,
+//             "uid": FSItem.Attribute.uid,
+//             "gid": FSItem.Attribute.gid,
+//             "flags": FSItem.Attribute.flags,
+//             "size": FSItem.Attribute.size,
+//             "allocSize": FSItem.Attribute.allocSize,
+//             "fileID": FSItem.Attribute.fileID,
+//             "parentID": FSItem.Attribute.parentID,
+//             "accessTime": FSItem.Attribute.accessTime,
+//             "modifyTime": FSItem.Attribute.modifyTime,
+//             "changeTime": FSItem.Attribute.changeTime,
+//             "birthTime": FSItem.Attribute.birthTime,
+//             "backupTime": FSItem.Attribute.backupTime,
+//             "addedTime": FSItem.Attribute.addedTime,
+//             "supportsLimitedXAttrs": FSItem.Attribute.supportsLimitedXAttrs,
+//             "inhibitKernelOffloadedIO": FSItem.Attribute.inhibitKernelOffloadedIO,
+//         ]
+//         for (key, value) in map {
+//             if self.isAttributeWanted(value) {
+//                 result += "\(key), "
+//             }
+//         }
+//         return result
+//     }
+// }
 
 // func readDirectoryEntriesUsingGetdirentries(fd: Int32) throws -> [(
 //     name: String, type: FSItem.ItemType
@@ -356,44 +356,6 @@ extension MyFSVolume: FSVolume.Operations {
         throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
     }
 
-    func enumerateDirectory(
-        _ directory: FSItem,
-        startingAt cookie: FSDirectoryCookie,
-        verifier: FSDirectoryVerifier,
-        attributes req: FSItem.GetAttributesRequest?,
-        packer: FSDirectoryEntryPacker
-    ) async throws -> FSDirectoryVerifier {
-
-        guard let directory = directory as? FSItemProtocol else {
-            throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
-        }
-        let attributes = req?.printRequestedAttributes ?? ""
-
-        var idx = 0
-        for (name, item) in try directory.getChildren() {
-            if idx < cookie.rawValue {
-                idx += 1
-                continue
-            }
-
-            let attributes = req != nil ? try item.getAttributes() : nil  //todo requested attributes?
-            let ok = packer.packEntry(
-                name: name,
-                itemType: item.itemType,
-                itemID: item.fileId,
-                nextCookie: FSDirectoryCookie(UInt64(idx + 1)),
-                attributes: attributes,
-            )
-
-            if !ok {
-                // fskit dont't want to continue
-                break
-            }
-            idx += 1
-        }
-
-        return FSDirectoryVerifier(0)  //todo change 0 for mutations
-    }
 }
 
 // extension MyFSVolume: FSVolume.OpenCloseOperations {

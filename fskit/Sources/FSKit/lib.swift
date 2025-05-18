@@ -24,6 +24,11 @@ public func fs_errorForPOSIXError(_: Int32) -> any Error {
     return NSError(domain: "domain", code: 0, userInfo: nil)
 }
 
+public struct FSDirectoryVerifier {  //not used
+    public init(_ rawValue: UInt64) {
+
+    }
+}
 
 
 open class FSMutableFileDataBuffer : NSObject {
@@ -140,27 +145,29 @@ extension FSItem {
     // /// A request to get attributes from an item.
     // ///
     // /// Methods that retrieve attributes use this type and inspect the ``wantedAttributes`` property to determine which attributes to provide. FSKit calls the ``isAttributeWanted(_:)`` method to determine whether the request requires a given attribute.
-    // open class GetAttributesRequest : NSObject, NSSecureCoding {
+    open class GetAttributesRequest : NSObject {
 
-    //     /// The attributes requested by the request.
-    //     ///
-    //     /// This property is a bit field in Objective-C and an <doc://com.apple.documentation/documentation/Swift/OptionSet> in Swift.
-    //     open var wantedAttributes: FSItem.Attribute
+        /// The attributes requested by the request.
+        ///
+        /// This property is a bit field in Objective-C and an <doc://com.apple.documentation/documentation/Swift/OptionSet> in Swift.
+        // open var wantedAttributes: FSItem.Attribute
 
-    //     /// A method that indicates whether the request wants given attribute.
-    //     ///
-    //     /// - Parameter attribute: The ``FSItemAttribute`` to check.
-    //     open func isAttributeWanted(_ attribute: FSItem.Attribute) -> Bool
-    // }
+        /// A method that indicates whether the request wants given attribute.
+        ///
+        /// - Parameter attribute: The ``FSItemAttribute`` to check.
+        open func isAttributeWanted(_ attribute: FSItem.Attribute) -> Bool {
+            return false //todo
+        }
+    }
 
-    /// A value that indicates a set of item attributes to get or set.
-    ///
-    /// This type is an option set in Swift.
-    /// In Objective-C, you use the cases of this enumeration to create a bit field.
-    // public struct Attribute : OptionSet, @unchecked Sendable {
 
-    //     public init(rawValue: Int)
-
+    public struct Attribute : OptionSet, @unchecked Sendable {
+        public let rawValue: Int
+        public init(rawValue: Int) {
+            self.rawValue = rawValue
+        }
+        
+    }
     //     /// The type attribute.
     //     public static var type: FSItem.Attribute { get }
 
@@ -236,17 +243,51 @@ extension FSItem {
         case socket = 7
     }
 
-    public enum Identifier : UInt64, @unchecked Sendable {
-
-        case invalid = 0
-
-        case parentOfRoot = 1
-
-        case rootDirectory = 2
+    public struct Identifier: RawRepresentable, Equatable, @unchecked Sendable {
+        public var rawValue: UInt64
+        
+        public init?(rawValue: UInt64) {
+            self.rawValue = rawValue
+        }
+        
+        // Define the same constants that were previously enum cases
+        public static let invalid = Identifier(rawValue: 0)!
+        public static let parentOfRoot = Identifier(rawValue: 1)!
+        public static let rootDirectory = Identifier(rawValue: 2)!
     }
 }
 
+public typealias FSDirectoryCookie = Int
 
+// public struct FSDirectoryCookie : Hashable, Equatable, RawRepresentable, @unchecked Sendable {
 
+//     public init(_ rawValue: UInt64) {
 
-  
+//     }
+
+    
+// }
+
+extension FSDirectoryCookie {
+
+//     /// The constant initial value for the directory-enumeration cookie.
+//     @available(macOS 15.4, *)
+    // public static let initial: FSDirectoryCookie = 2
+}
+
+public protocol FSDirectoryEntryPacker  {
+
+    /// Provides a directory entry during enumeration.
+    ///
+    /// You call this method in your implementation of ``FSVolume/Operations/enumerateDirectory(_:startingAt:verifier:attributes:packer:replyHandler:)``, for each directory entry you want to provide to the enumeration.
+    ///
+    /// - Parameters:
+    ///   - name: The item's name.
+    ///   - itemType: The type of the item.
+    ///   - itemID: The item's identifier.
+    ///   - nextCookie: A value to indicate the next entry in the directory to enumerate. FSKit passes this value as the `cookie` parameter on the next call to ``FSVolume/Operations/enumerateDirectory(_:startingAt:verifier:attributes:packer:replyHandler:)``. Use whatever value is appropriate for your implementation; the value is opaque to FSKit.
+    ///   - attributes: The item's attributes. Pass `nil` if the enumeration call didn't request attributes.
+    /// - Returns: `true` (Swift) or `YES` (Objective-C) if packing was successful and enumeration can continue with the next directory entry. If the value is `false` (Swift) or `NO` (Objective-C), stop enumerating. This result can happen when the entry is too big for the remaining space in the buffer.
+
+    func packEntry(name: FSFileName, itemType: FSItem.ItemType, itemID: FSItem.Identifier, nextCookie: FSDirectoryCookie, attributes: FSItem.Attributes?) -> Bool
+}
