@@ -236,7 +236,7 @@ class PlusPacker: FSDirectoryEntryPacker {
         name filename: FSFileName, itemType: FSItem.ItemType, itemID: FSItem.Identifier,
         nextCookie: FSDirectoryCookie, attributes: FSItem.Attributes?
     ) -> Bool {
-        print ("packEntry: \(filename.string ?? "")")
+        // print ("packEntry: \(filename.string ?? "")")
         let remaining = allBufSize - bufused
         // check remaining?
         guard let name = filename.string else {
@@ -263,7 +263,7 @@ class PlusPacker: FSDirectoryEntryPacker {
 
         let entrySize = name.withCString { cName in
             fuse_add_direntry_plus(
-                req, allBuf.advanced(by: bufused), remaining, cName, &entryParam, nextCookie+2)
+                req, allBuf.advanced(by: bufused), remaining, cName, &entryParam, nextCookie)
         }
         if entrySize > remaining {
             // todo do_forget() because I got ino
@@ -309,7 +309,7 @@ func main() throws {
     }
     operations.readdirplus = { (req, ino, size, off, fi) in
         // Only support root directory (ino == 1)
-        print("readdirplus: ino=\(ino), size=\(size), off=\(off)")
+        // print("readdirplus: ino=\(ino), size=\(size), off=\(off)")
         guard ino == 1 else {
             fuse_reply_err(req, ENOENT)
             return
@@ -321,33 +321,11 @@ func main() throws {
         let packer = PlusPacker(req: req, bufSize: size)
 
         do {
-            var hasCap = true
-            var offDIff = 0
-            if off < 1 {
-                hasCap = packer.packEntry(
-                    name: FSFileName(string: "."), itemType: .directory, itemID: dirNode.fileId,
-                    nextCookie: FSDirectoryCookie(-1), attributes: try dirNode.getAttributes())
-            } else {
-                offDIff += 1
-            }
-            if off < 2 {
-                if hasCap {
-                    let parentNode = dirNode  //todo
-                    hasCap = packer.packEntry(
-                        name: FSFileName(string: ".."), itemType: .directory,
-                        itemID: parentNode.fileId, nextCookie: FSDirectoryCookie(0),
-                        attributes: try parentNode.getAttributes())
-                }
-            } else {
-                offDIff += 1
-            }
+            let attrReq = FSItem.GetAttributesRequest()
+            let _ = try context.fileSystem.enumerateDirectory(
+                dirNode, startingAt: off, verifier: FSDirectoryVerifier(0), attributes: attrReq,
+                packer: packer)
 
-            if hasCap {
-                let attrReq = FSItem.GetAttributesRequest()
-                let _ = try context.fileSystem.enumerateDirectory(
-                    dirNode, startingAt: off - offDIff, verifier: FSDirectoryVerifier(0), attributes: attrReq,
-                    packer: packer)
-            }
         } catch {
             print("Error enumerating directory: \(error)")
             fuse_reply_err(req, EIO)

@@ -24,8 +24,8 @@ public func fs_errorForPOSIXError(_: Int32) -> any Error {
     return NSError(domain: "domain", code: 0, userInfo: nil)
 }
 
-public struct FSDirectoryVerifier {  //not used
-    public init(_ rawValue: UInt64) {
+public struct FSDirectoryVerifier: Sendable {  //not used
+    public init(_ rawValue: Int) {
 
     }
 }
