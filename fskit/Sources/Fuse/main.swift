@@ -263,7 +263,7 @@ class PlusPacker: FSDirectoryEntryPacker {
 
         let entrySize = name.withCString { cName in
             fuse_add_direntry_plus(
-                req, allBuf.advanced(by: bufused), remaining, cName, &entryParam, nextCookie)
+                req, allBuf.advanced(by: bufused), remaining, cName, &entryParam, Int(nextCookie.rawValue))
         }
         if entrySize > remaining {
             // todo do_forget() because I got ino

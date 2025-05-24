@@ -15,7 +15,9 @@ public class FSFileName {
 }
 
 open class FSVolume {
+    public init() {
 
+    }
 }
 
 

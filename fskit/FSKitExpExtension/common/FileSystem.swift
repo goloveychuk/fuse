@@ -2,20 +2,21 @@ import FSKit
 import Foundation
 
 public class FileSystem: FSVolume {
-    
+
     public func createRootNode(manifestPath: String) throws -> FSItemProtocol {
         let data = try Data(contentsOf: URL(filePath: manifestPath))
         let depTree = try DependencyNode.fromJSONData(data)
         let depFsNode = DependencyFSNodeCreator().buildTree(from: depTree)
         return depFsNode
     }
-    @objc(enumerateDirectory:startingAtCookie:verifier:providingAttributes:usingPacker:replyHandler:) public func enumerateDirectory(
+    // @objc(enumerateDirectory:startingAtCookie:verifier:providingAttributes:usingPacker:replyHandler:) public func enumerateDirectory(
+    public func enumerateDirectory(
         _ directory: FSItem,
         startingAt cookie: FSDirectoryCookie,
         verifier: FSDirectoryVerifier,
         attributes req: FSItem.GetAttributesRequest?,
         packer: FSDirectoryEntryPacker
-    ) async throws -> FSDirectoryVerifier {
+    ) throws -> FSDirectoryVerifier {
 
         // https://developer.apple.com/documentation/fskit/fsvolume/operations/enumeratedirectory(_:startingat:verifier:attributes:packer:replyhandler:)?language=objc
         // If the attributes parameter is nil, include at least two entries in a directory: "." and "..",
