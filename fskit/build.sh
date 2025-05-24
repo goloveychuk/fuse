@@ -11,8 +11,8 @@ umount ./test2 || true
 # -v verbose
 # -F - force fskit
 # 
-# mount -F -t MyFS -o -m=/Users/vadymh/Library/Containers/app.badim.FSKitExpExtension/Data/deptree.json  /dev/disk5 /tmp/TestVol
-mount -F -t MyFS -o -m=./build.sh,-d=./  /dev/disk5 ./test2
+mount -F -t MyFS -o -m=/Users/vadymh/github/fskit/FSKitSample/fuse-state.json  /dev/disk9 ./test2
+# mount -F -t MyFS -o -m=./build.sh,-d=./  /dev/disk5 ./test2
 biggest_pid=$(pgrep FSKitExpExtension | sort -n | tail -1 | tr -d ' ')
 echo "FSKIT PID: $biggest_pid"
 echo $biggest_pid | pbcopy

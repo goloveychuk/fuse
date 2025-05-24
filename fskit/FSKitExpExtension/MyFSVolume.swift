@@ -71,7 +71,7 @@ import os
 //     return results
 // }
 
-final class MyFSVolume: FSVolume {
+final class MyFSVolume: FileSystem {
     // var fd1: Int32 = -1
     var fd2: Int32 = -1
     private let resource: FSResource
@@ -198,7 +198,7 @@ extension MyFSVolume: FSVolume.Operations {
 
         do {
             let root = try {
-                return try self.createRootNode()
+                return try self.createRootNode(manifestPath: path)
                 // let fd = open("/Users/vadymh/work/responsive-editor2/node_modules", O_RDONLY | O_DIRECTORY, 0)
                 // if fd < 0 {
                 //     let error = errno

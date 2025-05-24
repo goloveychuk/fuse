@@ -1,36 +1,34 @@
 import FSKit
 import Foundation
 
-public class FileSystem {
-    public init() {
-
-    }
+public class FileSystem: FSVolume {
+    
     public func createRootNode(manifestPath: String) throws -> FSItemProtocol {
         let data = try Data(contentsOf: URL(filePath: manifestPath))
         let depTree = try DependencyNode.fromJSONData(data)
         let depFsNode = DependencyFSNodeCreator().buildTree(from: depTree)
         return depFsNode
     }
-    public func enumerateDirectory(
+    @objc(enumerateDirectory:startingAtCookie:verifier:providingAttributes:usingPacker:replyHandler:) public func enumerateDirectory(
         _ directory: FSItem,
         startingAt cookie: FSDirectoryCookie,
         verifier: FSDirectoryVerifier,
         attributes req: FSItem.GetAttributesRequest?,
         packer: FSDirectoryEntryPacker
-    ) throws -> FSDirectoryVerifier {
+    ) async throws -> FSDirectoryVerifier {
 
         // https://developer.apple.com/documentation/fskit/fsvolume/operations/enumeratedirectory(_:startingat:verifier:attributes:packer:replyhandler:)?language=objc
         // If the attributes parameter is nil, include at least two entries in a directory: "." and "..",
         // which represent the current and parent directories, respectively. Both of these items have type FSItemTypeDirectory.
         // For the root directory, "." and ".." have identical contents. Don’t pack "." and ".." if attributes isn’t nil.
 
-        let version = 0  //todo
+        let version = UInt64(0) //todo
         
         guard let directory = directory as? FSItemProtocol else {
             throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
         }
 
-        if cookie < 1 {
+        if cookie.rawValue < 1 {
             guard
                 packer.packEntry(
                     name: FSFileName(string: "."), itemType: .directory, itemID: directory.fileId,
@@ -41,7 +39,7 @@ public class FileSystem {
 
         }
 
-        if cookie < 2 {
+        if cookie.rawValue < 2 {
             guard
                 packer.packEntry(
                     name: FSFileName(string: ".."), itemType: .directory,
@@ -56,7 +54,7 @@ public class FileSystem {
 
 
         for (name, item) in try directory.getChildren() {
-            if currentOffset < cookie {
+            if currentOffset < cookie.rawValue {
                 currentOffset += 1
                 continue
             }
@@ -80,3 +78,4 @@ public class FileSystem {
         return FSDirectoryVerifier(version)
     }
 }
+
