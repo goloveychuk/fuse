@@ -1,6 +1,8 @@
 import FSKit
 import Foundation
 
+
+
 public class FileSystem: FSVolume, @unchecked Sendable {
 
     public func createRootNode(manifestPath: String) throws -> FSItemProtocol {
@@ -10,26 +12,16 @@ public class FileSystem: FSVolume, @unchecked Sendable {
         return depFsNode
     }
 
+
     public func enumerateDirectory(
-        _ directory: FSItem,
+        directory: FSItem,
         startingAt cookie: FSDirectoryCookie,
         verifier: FSDirectoryVerifier,
         attributes req: FSItem.GetAttributesRequest?,
         packer: FSDirectoryEntryPacker,
         // replyHandler: @escaping (FSDirectoryVerifier, (any Error)?) -> Void
     ) async throws -> FSDirectoryVerifier {
-        // let capturedVerifier = replyHandler
-
-        // Task { [weak replyHandler] in
-        //      try! await sda()
-        //      replyHandler?(verifier, nil)
-        // }
-        
-
-    // @objc(enumerateDirectory:startingAtCookie:verifier:providingAttributes:usingPacker:replyHandler:) public func enumerateDirectory(
-    
-
-//        // https://developer.apple.com/documentation/fskit/fsvolume/operations/enumeratedirectory(_:startingat:verifier:attributes:packer:replyhandler:)?language=objc
+// https://developer.apple.com/documentation/fskit/fsvolume/operations/enumeratedirectory(_:startingat:verifier:attributes:packer:replyhandler:)?language=objc
 //        // If the attributes parameter is nil, include at least two entries in a directory: "." and "..",
 //        // which represent the current and parent directories, respectively. Both of these items have type FSItemTypeDirectory.
 //        // For the root directory, "." and ".." have identical contents. Don’t pack "." and ".." if attributes isn’t nil.

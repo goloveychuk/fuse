@@ -231,6 +231,17 @@ extension MyFSVolume: FSVolume.Operations {
     func synchronize(flags: FSSyncFlags) async throws {
         // logger.debug("synchronize")
     }
+    
+    public func enumerateDirectory(
+        _ directory: FSItem,
+        startingAt cookie: FSDirectoryCookie,
+        verifier: FSDirectoryVerifier,
+        attributes req: FSItem.GetAttributesRequest?,
+        packer: FSDirectoryEntryPacker,
+        // replyHandler: @escaping (FSDirectoryVerifier, (any Error)?) -> Void
+    ) async throws -> FSDirectoryVerifier {
+        return try await super.enumerateDirectory(directory: directory, startingAt: cookie, verifier: verifier, attributes: req, packer: packer)
+    }
 
     func attributes(
         _ desiredAttributes: FSItem.GetAttributesRequest,

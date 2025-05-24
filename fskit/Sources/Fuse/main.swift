@@ -300,20 +300,24 @@ func main() throws {
     // operations.destroy = ll_destroy
     // operations.lookup = ll_lookup
     operations.getattr = { (req, ino, fi) in
-        print("getattr: ino=\(ino)")
+        let req = SendableAnything(req)
+        Task.detached {
 
-        // Define a dummy stat structure
-        var stbuf = stat()
-        memset(&stbuf, 0, MemoryLayout<stat>.size)
+            print("getattr: ino=\(ino)")
 
-        // Set dummy attributes
-        stbuf.st_ino = ino_t(ino)
-        stbuf.st_mode = S_IFDIR | 0o755
-        stbuf.st_nlink = 2
-        stbuf.st_size = 0
+            // Define a dummy stat structure
+            var stbuf = stat()
+            memset(&stbuf, 0, MemoryLayout<stat>.size)
 
-        // Reply with the attributes
-        fuse_reply_attr(req, &stbuf, 1.0)
+            // Set dummy attributes
+            stbuf.st_ino = ino_t(ino)
+            stbuf.st_mode = S_IFDIR | 0o755
+            stbuf.st_nlink = 2
+            stbuf.st_size = 0
+
+            // Reply with the attributes
+            fuse_reply_attr(req.value, &stbuf, 1.0)
+        }
     }
     operations.readdirplus = { (req, ino, size, off, fi) in
         // Only support root directory (ino == 1)
@@ -322,33 +326,35 @@ func main() throws {
             fuse_reply_err(req, ENOENT)
             return
         }
+            // sleep(10)
+
         // context.rootNode.getChildren()
         // Hardcoded directory entries
 
-        let req2 = SendableAnything(req)
+        let req = SendableAnything(req)
         // DispatchQueue.global().async {
 
         Task.detached {
-            let packer = PlusPacker(req: req2.value, bufSize: size)
+            let packer = PlusPacker(req: req.value, bufSize: size)
             let dirNode = context.rootNode!
 
             let attrReq = FSItem.GetAttributesRequest([.fileID, .mode, .linkCount, .size])  //todo
             print("readdirplus: starting enumeration")
             do {
-                sleep(1)
+                sleep(10)
                 // try await Task.sleep(for: .seconds(1))
                 let _ = try await context.fileSystem.enumerateDirectory(
-                    dirNode, startingAt: FSDirectoryCookie(UInt64(off)),
+                    directory: dirNode, startingAt: FSDirectoryCookie(UInt64(off)),
                     verifier: FSDirectoryVerifier(0),
                     attributes: attrReq,
                     packer: packer
                 )
                 let buf = packer.getBuf()
                 print("readdirplus: replied with \(buf.used) bytes")
-                fuse_reply_buf(req2.value, buf.buf, buf.used)
+                fuse_reply_buf(req.value, buf.buf, buf.used)
             } catch {
                 print("readdirplus: error occurred")
-                fuse_reply_err(req2.value, EIO)  //todo err
+                fuse_reply_err(req.value, EIO)  //todo err
             }
 
         }
@@ -426,7 +432,7 @@ func main() throws {
     }
 
     let foreground: Int32 = 1  //If foreground is 0, fuse_daemonize() will detach from the controlling terminal and run in the background as a system daemon. Otherwise, the process will continue to run in the foreground.
-    let multithreaded = true
+    let multithreaded = false
     let max_threads: UInt32 = 4
     let clone_fd: UInt32 = 1  //whether to use separate device fds for each thread (may increase performance)
     fuse_daemonize(foreground)
