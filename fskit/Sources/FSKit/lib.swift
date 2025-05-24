@@ -14,6 +14,10 @@ public class FSFileName {
 
 }
 
+open class FSVolume {
+
+}
+
 
 open class FSItem : NSObject {
     
@@ -25,7 +29,7 @@ public func fs_errorForPOSIXError(_: Int32) -> any Error {
 }
 
 public struct FSDirectoryVerifier: Sendable {  //not used
-    public init(_ rawValue: Int) {
+    public init(_ rawValue: UInt64) {
 
     }
 }
@@ -259,22 +263,24 @@ extension FSItem {
     }
 }
 
-public typealias FSDirectoryCookie = Int
+// public typealias FSDirectoryCookie = Int
 
-// public struct FSDirectoryCookie : Hashable, Equatable, RawRepresentable, @unchecked Sendable {
+public struct FSDirectoryCookie : RawRepresentable, Sendable {
+    public let rawValue: UInt64
+    public init(_ rawValue: UInt64) {
+        self.rawValue = rawValue
+    }
 
-//     public init(_ rawValue: UInt64) {
-
-//     }
-
-    
-// }
+    public init(rawValue: UInt64) {
+        self.rawValue = rawValue
+    }
+}
 
 extension FSDirectoryCookie {
 
 //     /// The constant initial value for the directory-enumeration cookie.
 //     @available(macOS 15.4, *)
-    public static let initial: FSDirectoryCookie = 0
+    public static let initial: FSDirectoryCookie = FSDirectoryCookie(0)
 }
 
 public protocol FSDirectoryEntryPacker  {

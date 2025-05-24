@@ -323,7 +323,7 @@ func main() throws {
         do {
             let attrReq = FSItem.GetAttributesRequest([.fileID, .mode, .linkCount, .size]) //todo
             let _ = try context.fileSystem.enumerateDirectory(
-                dirNode, startingAt: off, verifier: FSDirectoryVerifier(0), attributes: attrReq,
+                dirNode, startingAt: FSDirectoryCookie(UInt64(off)), verifier: FSDirectoryVerifier(0), attributes: attrReq,
                 packer: packer)
 
         } catch {
