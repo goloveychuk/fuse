@@ -137,7 +137,7 @@ enum DependencyNode: Decodable {
     }
 }
 
-public protocol FSItemProtocol: FSItem {
+public protocol FSItemProtocol: FSItem, Sendable {
     var fileId: FSItem.Identifier { get }
     var parentId: FSItem.Identifier { get }
     var itemType: FSItem.ItemType { get }
@@ -171,7 +171,7 @@ extension FSItem.Identifier {
 private let uid = getuid()
 private let gid = getgid()
 
-final class ZipFSNode: FSItem, FSItemProtocol {
+final class ZipFSNode: NSObject, FSItemProtocol {
     private let cachedZip: CachedZip
     private let zipId: ZipID
     let parentId: FSItem.Identifier
@@ -427,7 +427,7 @@ final class SoftDependencyFSNode: FSItem, FSItemProtocol {
     }
 }
 
-class HardDependencyFSNode: FSItem, FSItemProtocol {
+class HardDependencyFSNode: FSItem, FSItemProtocol, @unchecked Sendable {
     let fileId: FSItem.Identifier
     let itemType: FSItem.ItemType = .directory
     internal let children: [PathSegment: FSItemProtocol]
@@ -482,7 +482,7 @@ class HardDependencyFSNode: FSItem, FSItemProtocol {
 
 final class ZipHardDependencyFSNode: HardDependencyFSNode {
     private let zipInfo: ZipInfo
-    private var cachedRootId: ZipID? = nil
+    // private var cachedRootId: ZipID? = nil
 
     init(
         fileId: FSItem.Identifier, parentId: FSItem.Identifier,
@@ -497,14 +497,16 @@ final class ZipHardDependencyFSNode: HardDependencyFSNode {
     }
 
     private func getRootId(listableZip: ListableZip) throws -> ZipID {
-        let rootId =
-            try cachedRootId
-            ?? {
-                let rootId = try listableZip.getIdForPath(path: ZipPath(path: zipInfo.subpath))
-                cachedRootId = rootId  // todo mutex?
-                return rootId
-            }()
-        return rootId
+        return try listableZip.getIdForPath(path: ZipPath(path: zipInfo.subpath))
+
+        // let rootId =
+        //     try cachedRootId
+        //     ?? {
+        //         let rootId = try listableZip.getIdForPath(path: ZipPath(path: zipInfo.subpath))
+        //         cachedRootId = rootId  
+        //         return rootId
+        //     }()
+        // return rootId
     }
 
     private func getZipChildren() throws -> Indexed<ZipID> {

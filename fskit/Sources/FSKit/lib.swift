@@ -20,10 +20,11 @@ open class FSVolume {
     }
 }
 
+public typealias FSItem = NSObject
 
-open class FSItem : NSObject {
-    
-}
+// open class FSItem : NSObject {
+
+// }
 
 public func fs_errorForPOSIXError(_: Int32) -> any Error {
 
@@ -232,7 +233,7 @@ extension FSItem {
     }
 
     /// An enumeration of item types, such as file, directory, or symbolic link.
-    public enum ItemType : Int, @unchecked Sendable {
+    public enum ItemType : Int, Sendable {
 
         case unknown = 0
 
@@ -251,7 +252,7 @@ extension FSItem {
         case socket = 7
     }
 
-    public struct Identifier: RawRepresentable, Equatable, @unchecked Sendable {
+    public struct Identifier: RawRepresentable, Equatable, Sendable {
         public var rawValue: UInt64
         
         public init?(rawValue: UInt64) {

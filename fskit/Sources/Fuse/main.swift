@@ -326,22 +326,17 @@ func main() throws {
             fuse_reply_err(req, ENOENT)
             return
         }
-            // sleep(10)
-
-        // context.rootNode.getChildren()
-        // Hardcoded directory entries
-
         let req = SendableAnything(req)
         // DispatchQueue.global().async {
+        let dirNode = context.rootNode!
 
         Task.detached {
             let packer = PlusPacker(req: req.value, bufSize: size)
-            let dirNode = context.rootNode!
 
             let attrReq = FSItem.GetAttributesRequest([.fileID, .mode, .linkCount, .size])  //todo
             print("readdirplus: starting enumeration")
             do {
-                sleep(10)
+                // sleep(10)
                 // try await Task.sleep(for: .seconds(1))
                 let _ = try await context.fileSystem.enumerateDirectory(
                     directory: dirNode, startingAt: FSDirectoryCookie(UInt64(off)),
@@ -367,12 +362,12 @@ func main() throws {
     // operations.read = ll_read
 
     // Mount point
-    let mountPoint = "/tmp/fuse-mount3"
+    let mountPoint = CommandLine.arguments[3]
 
     let fs = FileSystem()
     context.fileSystem = fs
     context.rootNode = try fs.createRootNode(
-        manifestPath: "/workspaces/FSKitSample/fuse-state.json")
+        manifestPath: CommandLine.arguments[2])
 
     // Create mount point if needed
     let fileManager = FileManager.default
@@ -385,7 +380,7 @@ func main() throws {
             return
         }
     }
-
+    print("CommandLine.arguments: \(CommandLine.arguments)")
     // Prepare arguments
     let args = [
         CommandLine.arguments[0],

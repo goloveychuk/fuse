@@ -1,7 +1,7 @@
 import Foundation
 
 
-class CachedZip {
+class CachedZip: @unchecked Sendable {
     private var rwlock: pthread_rwlock_t = pthread_rwlock_t()
     var refCount: UInt32
     private enum ZipState {
