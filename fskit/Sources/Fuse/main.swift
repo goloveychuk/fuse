@@ -212,9 +212,26 @@ import common
 //     }
 // }
 
-class Context: @unchecked Sendable {
-    var rootNode: FSItemProtocol!
+class Context {
+    private var rootNode: FSItemProtocol!
     var fileSystem: FileSystem!
+    private var nodeCache: [fuse_ino_t: FSItemProtocol] = [:]
+    func setRootNode(_ node: FSItemProtocol) {
+        rootNode = node
+        addNode(node)
+    }
+    func findNode(inode: fuse_ino_t) -> FSItemProtocol {
+        if (inode == 1) {
+            return rootNode
+        }
+        return nodeCache[inode]!
+    }
+    func addNode(_ node: FSItemProtocol) {
+        nodeCache[node.fileId.rawValue] = node
+    }
+    func removeNode(forInode inode: fuse_ino_t) {
+        nodeCache.removeValue(forKey: inode)
+    }
 }
 
 let context = Context()
@@ -322,13 +339,19 @@ func main() throws {
     operations.readdirplus = { (req, ino, size, off, fi) in
         // Only support root directory (ino == 1)
         // print("readdirplus: ino=\(ino), size=\(size), off=\(off)")
-        guard ino == 1 else {
-            fuse_reply_err(req, ENOENT)
-            return
-        }
+        // guard ino == 1 else {
+        //     fuse_reply_err(req, ENOENT)
+        //     return
+        // }
         let req = SendableAnything(req)
         // DispatchQueue.global().async {
-        let dirNode = context.rootNode!
+        let dirNode = context.findNode(inode: ino)
+
+        for (name, item) in try! dirNode.getChildren() { //todo try
+            context.addNode(item)
+        }
+
+        let fs = context.fileSystem!
 
         Task.detached {
             let packer = PlusPacker(req: req.value, bufSize: size)
@@ -338,13 +361,17 @@ func main() throws {
             do {
                 // sleep(10)
                 // try await Task.sleep(for: .seconds(1))
-                let _ = try await context.fileSystem.enumerateDirectory(
+                let _ = try await fs.enumerateDirectory(
                     directory: dirNode, startingAt: FSDirectoryCookie(UInt64(off)),
                     verifier: FSDirectoryVerifier(0),
                     attributes: attrReq,
                     packer: packer
                 )
                 let buf = packer.getBuf()
+
+               
+
+
                 print("readdirplus: replied with \(buf.used) bytes")
                 fuse_reply_buf(req.value, buf.buf, buf.used)
             } catch {
@@ -366,8 +393,8 @@ func main() throws {
 
     let fs = FileSystem()
     context.fileSystem = fs
-    context.rootNode = try fs.createRootNode(
-        manifestPath: CommandLine.arguments[2])
+    context.setRootNode(try fs.createRootNode(
+        manifestPath: CommandLine.arguments[2]))
 
     // Create mount point if needed
     let fileManager = FileManager.default
