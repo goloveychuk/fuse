@@ -5,17 +5,58 @@ import { jsInstallUtils } from '@yarnpkg/plugin-pnp';
 import { UsageError } from 'clipanion';
 import { FuseNode } from './types';
 import { mountFuse } from './runFuse';
+import * as fs from 'fs/promises'
+import * as path from 'path'
+import * as crypto from 'crypto';
 
 function assign(node: FuseNode, data: FuseNode) {
   Object.assign(node, data);
-} 
+}
+const MAGIC_HASH_FILE = '.yarn-content-hash'
+
+async function calculateDirHash(dirPath: string): Promise<string> {
+  // Get all entries in the directory
+  const entries = await fs.readdir(dirPath, { withFileTypes: true });
+
+  // Sort entries for consistent hash generation regardless of read order
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+
+  // Process all entries in parallel for better performance
+  const entryHashes = await Promise.all(
+    entries.map(async (entry) => {
+      if (entry.name === MAGIC_HASH_FILE) {
+        return ''
+      }
+      const entryPath = path.join(dirPath, entry.name);
+
+      if (entry.isDirectory()) {
+        // Recursively calculate hash for subdirectory
+        const subDirHash = await calculateDirHash(entryPath);
+        return `${entry.name}:dir:${subDirHash}`;
+      } else if (entry.isFile()) {
+        // Get file stats for mtime
+        const stats = await fs.stat(entryPath, { bigint: true });
+        return `${entry.name}:file:${stats.mtimeMs}`;
+      }
+      // Skip symlinks and special files
+      return '';
+    })
+  );
+
+  // Filter out empty results and combine
+  const combinedData = entryHashes.filter(Boolean).join('|');
+
+  // Generate hash from combined data
+  return crypto.createHash('sha256').update(combinedData).digest('hex');
+}
+
 
 interface DependencyData {
   isWorkspace: boolean;
   target: PortablePath | null;
   packageLocation: PortablePath;
   dependenciesLocation: PortablePath | null;
-  dependenciesLinks?: Map<PortablePath, {relative: PortablePath, absolute: PortablePath}>;
+  dependenciesLinks?: Map<PortablePath, { relative: PortablePath, absolute: PortablePath }>;
 }
 export type FuseCustomData = {
   locatorByPath: Map<PortablePath, string>;
@@ -107,13 +148,15 @@ const getPathNode = (start: FuseNode, path: PortablePath) => {
 }
 
 class FuseInstaller implements Installer {
-  private readonly asyncActions = new miscUtils.AsyncActions(10);
+  private readonly asyncActions = new miscUtils.AsyncActions(5);
   private readonly indexFolderPromise: Promise<PortablePath>;
+  private fuseIsSupported: boolean;
 
   constructor(private opts: LinkOptions) {
     this.indexFolderPromise = setupCopyIndex(xfs, {
       indexPath: ppath.join(opts.project.configuration.get(`globalFolder`), `index`),
     });
+    this.fuseIsSupported = false;
   }
 
   private customData: FuseCustomData = {
@@ -170,7 +213,7 @@ class FuseInstaller implements Installer {
     const dependencyMeta = this.opts.project.getDependencyMeta(devirtualizedLocator, pkg.version);
     const buildRequest = jsInstallUtils.extractBuildRequest(pkg, buildConfig, dependencyMeta, { configuration: this.opts.project.configuration });
 
-    const packagePaths = getPackagePaths(pkg, { project: this.opts.project, buildRequest });
+    const packagePaths = getPackagePaths(pkg, { project: this.opts.project, buildRequest, fuseIsSupported: this.fuseIsSupported });
     const packageLocation = packagePaths.packageLocation;
 
     this.customData.locatorByPath.set(packageLocation, structUtils.stringifyLocator(pkg));
@@ -246,7 +289,7 @@ class FuseInstaller implements Installer {
 
       const depLinkPath = ppath.relative(ppath.dirname(depDstPath), depSrcPaths.packageLocation);
 
-      dependencyData.dependenciesLinks!.set(name, {relative: depLinkPath, absolute: depSrcPaths.packageLocation});
+      dependencyData.dependenciesLinks!.set(name, { relative: depLinkPath, absolute: depSrcPaths.packageLocation });
     }
 
     let hasExplicitSelfDependency = false;
@@ -267,14 +310,45 @@ class FuseInstaller implements Installer {
   }
 
 
-  private async persistHardDependency(defaultFsLayer: VirtualFS, dependencyData: DependencyData) {
+  private async isPackageValid(dependencyData: DependencyData) {
+    const hashFilePath = ppath.join(dependencyData.packageLocation, MAGIC_HASH_FILE);
+    if (!await xfs.existsPromise(dependencyData.packageLocation)) {
+      return false
+    }
+    let expectedHash: string;
+    try {
+      expectedHash = await xfs.readFilePromise(hashFilePath, 'utf8');
+    } catch {
+      // hash is written after the package is copied, so if it doesn't exist, we assume the package is invalid
+      return false
+    }
+    if (!process.env.FORCE) {
+      const existingHash = await calculateDirHash(dependencyData.packageLocation);
+      if (expectedHash === existingHash) {
+        return true
+      } else {
+        console.warn('Hash changed for', dependencyData.packageLocation);
+        return false
+      }
+    }
+    return true
 
+  }
+
+  private async persistHardDependency(defaultFsLayer: VirtualFS, dependencyData: DependencyData) {
     await xfs.mkdirPromise(dependencyData.packageLocation, { recursive: true });
     if (dependencyData.target) {
-      //todo mimic nm linker
-      await xfs.copyPromise(dependencyData.packageLocation, dependencyData.target, {
-        baseFs: defaultFsLayer,
-      });
+      const dirIsValid = await this.isPackageValid(dependencyData)
+      if (!dirIsValid) {
+        await xfs.removePromise(dependencyData.packageLocation, { recursive: true });
+        await xfs.copyPromise(dependencyData.packageLocation, dependencyData.target, {
+          baseFs: defaultFsLayer,
+        });
+        const hash = await calculateDirHash(dependencyData.packageLocation)
+        const hashFilePath = ppath.join(dependencyData.packageLocation, MAGIC_HASH_FILE);
+        await xfs.changeFilePromise(hashFilePath, hash);
+      }
+
     }
     if (!dependencyData.dependenciesLocation) {
       return
@@ -289,7 +363,7 @@ class FuseInstaller implements Installer {
 
     const concurrentPromises: Array<Promise<void>> = [];
 
-    for (const [name, {absolute, relative}] of dependencyData.dependenciesLinks!) {
+    for (const [name, { absolute, relative }] of dependencyData.dependenciesLinks!) {
       const depDstPath = ppath.join(dependencyData.dependenciesLocation, name);
 
       const existing = extraneous.get(name);
@@ -337,14 +411,17 @@ class FuseInstaller implements Installer {
       let relative = ppath.relative(mountRoot, dependencyData.packageLocation);
 
       if (relative.startsWith(`..`)) {
-
+        // this is all packages which are outside mountroot. Which is 
+        //  hacky but works
         this.asyncActions.set(locatorHash, async () => {
           await this.persistHardDependency(defaultFsLayer, dependencyData);
         });
         continue
       }
 
-
+      // this are mocked packages. They don't have zip file. But maybe I should write it to disk to be consistent with unplugged behaviour.
+      // const shouldMock = !!opts.mockedPackages?.has(locator.locatorHash) && (!this.check || !cacheFileExists);
+      // shouldMock ? makeMockPackage(): Zipfs...
       if (this.opts.project.disabledLocators.has(locatorHash)) {
         continue
       }
@@ -378,17 +455,19 @@ class FuseInstaller implements Installer {
         }
       }
     }
-
-    const fuseStatePath = ppath.join(
-      this.opts.project.cwd,
-      `.yarn/fuse-state.json`,
-    );
-    //todo sort fuse data
-    await xfs.changeFilePromise(fuseStatePath, JSON.stringify(fuseData), {});
-
+    let promises: Promise<unknown>[] = []
+    if (this.fuseIsSupported) {
+      const fuseStatePath = ppath.join(
+        this.opts.project.cwd,
+        `.yarn/fuse-state.json`,
+      );
+      //todo sort fuse data
+      await xfs.changeFilePromise(fuseStatePath, JSON.stringify(fuseData), {});
+      promises.push(mountFuse(mountRoot, fuseStatePath));
+    }
     await Promise.all([
       this.asyncActions.wait(),
-      mountFuse(mountRoot, fuseStatePath),
+      ...promises,
     ]);
 
 
@@ -447,10 +526,10 @@ function getStoreLocation(project: Project, { unplugged }: { unplugged: boolean 
 }
 
 
-function getPackagePaths(locator: Locator, { project, buildRequest }: { project: Project, buildRequest: BuildRequest | null }) {
+function getPackagePaths(locator: Locator, { project, buildRequest, fuseIsSupported }: { project: Project, buildRequest: BuildRequest | null, fuseIsSupported: boolean }) {
   const pkgKey = structUtils.slugifyLocator(locator);
   const shouldBuild = Boolean(buildRequest && !buildRequest.skipped);
-  const storeLocation = getStoreLocation(project, { unplugged: shouldBuild });
+  const storeLocation = getStoreLocation(project, { unplugged: shouldBuild || fuseIsSupported === false });
 
   const packageLocation = ppath.join(storeLocation, pkgKey, `package`);
   const dependenciesLocation = ppath.join(storeLocation, pkgKey, Filename.nodeModules);

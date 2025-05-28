@@ -9,6 +9,7 @@ if (res.error) {
   console.error('Error running hdiutil:', res.error);
   process.exit(1);
 }
+//@ts-expect-error
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const imagePath = path.join(__dirname, '../fskit/dummy');
 const output = res.stdout.toString();

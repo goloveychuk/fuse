@@ -151,7 +151,7 @@ extension Permissions {
 }
 
 enum ZipID {
-    case file(entryId: Int, permissions: Permissions)
+    case file(entryId: Int,  permissions: Permissions)
     case symlink(entryId: Int)
     case dir(listingId: Int)
     static var root: ZipID {
