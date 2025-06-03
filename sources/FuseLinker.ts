@@ -322,12 +322,12 @@ class FuseInstaller implements Installer {
       // hash is written after the package is copied, so if it doesn't exist, we assume the package is invalid
       return false
     }
-    if (!process.env.FORCE) {
+    if (process.env.FORCE) {
       const existingHash = await calculateDirHash(dependencyData.packageLocation);
       if (expectedHash === existingHash) {
         return true
       } else {
-        console.warn('Hash changed for', dependencyData.packageLocation);
+        console.warn('Reinstalling', dependencyData.packageLocation);
         return false
       }
     }
