@@ -150,7 +150,7 @@ extension Permissions {
     }
 }
 
-enum ZipID {
+enum ZipID: Hashable {
     case file(entryId: UInt)
     case symlink(entryId: UInt)
     case dir(listingId: UInt)
@@ -281,7 +281,8 @@ class ListableZip {
     private static let CENTRAL_DIRECTORY: UInt32 = 0x0201_4b50
     private static let END_OF_CENTRAL_DIRECTORY: UInt32 = 0x0605_4b50
 
-    private var allEntries: [MinEntry] = []
+    private let allEntries: [MinEntry] 
+    private let parentMapping: [ZipID: Int]
     private let listings: Listings
     private let fileURL: URL
 
@@ -379,14 +380,11 @@ class ListableZip {
 
     }
 
-    func getParentForZipID(zipID: ZipID) -> ZipID? {
-        return nil //todo impl
-        // switch zipID {
-        // case .dir(let listingId):
-        //     return .dir(listingId: listingId - 1)
-        // case .file(let entryId), .symlink(let entryId):
-        //     return .dir(listingId: entryId)
-        // }
+    func getParentForZipID(zipID: ZipID) -> ZipID? { //nil returned for root node
+        if (zipID == .root) {
+            return nil
+        }
+        return .dir(listingId: UInt(parentMapping[zipID]!))
     }
 
 
@@ -394,6 +392,8 @@ class ListableZip {
         self.fileURL = fileURL
         let entries = try ListableZip.readZipEntries(fileURL: fileURL)
         var listings = Listings()
+        var parentMapping = [ZipID: Int]()
+        var allEntries = [MinEntry]()
 
         var nameToIndMap = [ZipPathSegment: Int]()
 
@@ -412,6 +412,7 @@ class ListableZip {
                 throw ZipError.invalidListing("Parent directory not found")
             }
             listings[parentId][childName.filename] = childID
+            parentMapping[childID] = parentId
         }
 
         _ = try addDirectory(parent: ZipPath.Root)
@@ -444,6 +445,8 @@ class ListableZip {
         }
         // let stringified = listings.print()
         self.listings = listings
+        self.parentMapping = parentMapping
+        self.allEntries = allEntries
     }
 
     private static func readZipEntries(fileURL: URL) throws -> [ZipEntry] {
