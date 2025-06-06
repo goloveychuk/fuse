@@ -310,12 +310,12 @@ class ListableZip {
         return listings[Int(index)]
     }
 
-    func getEntry(index: Int) -> MinEntry {
-        return allEntries[index]
+    func getEntry(index: UInt) -> MinEntry {
+        return allEntries[Int(index)]
     }
 
     func readData(
-        index: Int, offset: Int, length: Int, bufferPointer: UnsafeMutableRawBufferPointer
+        index: UInt, offset: Int, length: Int, bufferPointer: UnsafeMutableRawBufferPointer
     ) throws -> Int {
         let entry = getEntry(index: index)
 
