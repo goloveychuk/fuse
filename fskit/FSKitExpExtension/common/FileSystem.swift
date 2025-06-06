@@ -240,6 +240,24 @@ public class FileSystem: FSVolume, @unchecked Sendable {
         return attr
     }
 
+    public func getAttributes(
+        _ desiredAttributes: FSItem.GetAttributesRequest,
+        of fileId: FSItem.Identifier
+    ) async throws -> FSItem.Attributes {
+        let nodeData = getNodeByFileId(fileId)
+        return try getAttributesForNodeData(nodeData: nodeData)
+    }
+
+    public func lookupItem(
+        _ name: FSFileName,
+        inDirectory directory: FSItem.Identifier
+    ) async throws -> (FSItem.Identifier, FSFileName) {
+        let nodeData = getNodeByFileId(directory)
+
+
+        return (identifier, name)
+
+    }
     public func enumerateDirectory(
         directory: FSItem.Identifier,
         startingAt cookie: FSDirectoryCookie,
@@ -280,13 +298,14 @@ public class FileSystem: FSVolume, @unchecked Sendable {
             var currentOffset = 2
 
             let zipInfo = nodeData.rootNode.zipInfo
-            var zipId: ZipID?
+            var childrenForZipId: ZipID?
             
             if nodeData.zipId == nil {
-                if let zipInfo = zipInfo {
-                    zipId = try zipInfo.cachedZip.get().getIdForPath(
-                        path: ZipPath(path: zipInfo.subpath))
+                if case .zip(_, _) = nodeData.rootNode.node {
+                    childrenForZipId = try zipInfo!.cachedZip.get().getIdForPath(
+                        path: ZipPath(path: zipInfo!.subpath))
                 }
+
                 for (name, child) in children {
                     defer {
                         currentOffset += 1
@@ -310,12 +329,12 @@ public class FileSystem: FSVolume, @unchecked Sendable {
                     }
                 }
             } else {
-                zipId = nodeData.zipId
+                childrenForZipId = nodeData.zipId
             }
 
-            if let zipId = zipId {
-                if case .zip(let zipInfo, _) = nodeData.rootNode.node {
-                    let cachedZip = zipCache[zipInfo.zipPath]!
+            if let zipId = childrenForZipId {
+                if case .zip(_, _) = nodeData.rootNode.node {
+                    let cachedZip = zipInfo!.cachedZip
                     let zip = try cachedZip.get()
                     let zipEntries = zip.getChildren(forId: zipId)
                     for (name, zipId) in zipEntries.entries() {
@@ -348,7 +367,7 @@ public class FileSystem: FSVolume, @unchecked Sendable {
 
     }
 
-    func readSymbolicLink(fileID: FSItem.Identifier) throws -> FSFileName {
+    public func readSymbolicLink(_ fileID: FSItem.Identifier) async throws -> FSFileName {
 
         let nodeData = getNodeByFileId(fileID)
         if let zipId = nodeData.zipId {
@@ -382,8 +401,8 @@ public class FileSystem: FSVolume, @unchecked Sendable {
     }
 
     func readData(
-        fileID: FSItem.Identifier, offset: off_t, length: Int, into buffer: FSMutableFileDataBuffer
-    ) throws -> Int {
+        _ fileID: FSItem.Identifier, offset: off_t, length: Int, into buffer: FSMutableFileDataBuffer
+    ) async throws -> Int {
         let nodeData = getNodeByFileId(fileID)
 
         guard let zipId = nodeData.zipId else {
