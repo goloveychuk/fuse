@@ -9,6 +9,15 @@ import FSKit
 import Foundation
 import os
 
+
+@available(macOS 15.4, *)
+class MyFSItem: FSItem {
+    let fileId: FSItem.Identifier
+    init(fileId: FSItem.Identifier) {
+        self.fileId = fileId
+    }    
+}
+
 // extension FSItem.GetAttributesRequest {
 //     var printRequestedAttributes: String {
 //         var result = ""
@@ -71,12 +80,13 @@ import os
 //     return results
 // }
 
-final class MyFSVolume: FileSystem {
+@available(macOS 15.4, *)
+final class MyFSVolume: FSVolume {
     // var fd1: Int32 = -1
     var fd2: Int32 = -1
     private let resource: FSResource
     var urls: [URL?]?
-    private var depTree: DependencyNode?
+    private var fs: FileSystem!
     var p: [URL?]?
     var mount3: FSTaskOptions? = nil
 
@@ -92,7 +102,7 @@ final class MyFSVolume: FileSystem {
     }
 }
 // extension MyFSVolume: FSVolumeKernelOffloadedIOOperations
-
+@available(macOS 15.4, *)
 extension MyFSVolume: FSVolume.PathConfOperations {
 
     var maximumLinkCount: Int {
@@ -129,6 +139,7 @@ extension MyFSVolume: FSVolume.PathConfOperations {
 //     }
 // }
 
+@available(macOS 15.4, *)
 extension MyFSVolume: FSVolume.Operations {
 
     var supportedVolumeCapabilities: FSVolume.SupportedCapabilities {
@@ -197,17 +208,8 @@ extension MyFSVolume: FSVolume.Operations {
         logger.debug("activate")
 
         do {
-            let root = try {
-                return try self.createRootNode(manifestPath: path)
-                // let fd = open("/Users/vadymh/work/responsive-editor2/node_modules", O_RDONLY | O_DIRECTORY, 0)
-                // if fd < 0 {
-                //     let error = errno
-                //     // logger.error("Failed to open directory: \(path), error: \(error)")
-                //     throw fs_errorForPOSIXError(error)
-                // }
-                // return PortalDirFSItem(fileId: .rootDirectory, parentId: .parentOfRoot, dirFD: DirFd(fd))
-            }()
-            return root
+            self.fs = try FileSystem(manifestPath: path)
+            return MyFSItem(fileId: .rootDirectory)
 
         } catch {
             logger.error("Error mounting: \(error)")
@@ -240,27 +242,20 @@ extension MyFSVolume: FSVolume.Operations {
         packer: FSDirectoryEntryPacker,
         // replyHandler: @escaping (FSDirectoryVerifier, (any Error)?) -> Void
     ) async throws -> FSDirectoryVerifier {
-        return try await super.enumerateDirectory(directory: directory, startingAt: cookie, verifier: verifier, attributes: req, packer: packer)
+        guard let directory = directory as? MyFSItem else {
+            throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
+        }
+        return try await fs.enumerateDirectory(directory: directory.fileId, startingAt: cookie, verifier: verifier, attributes: req, packer: packer)
     }
 
     func attributes(
         _ desiredAttributes: FSItem.GetAttributesRequest,
         of item: FSItem
     ) async throws -> FSItem.Attributes {
-
-        if let item = item as? FSItemProtocol {
-            return try item.getAttributes()
-        } else {
-            // logger.debug("getItemAttributes2: \(item), \(desiredAttributes)")
-            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        guard let item = item as? MyFSItem else {
+            throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
         }
-    }
-
-    func setAttributes(
-        _ newAttributes: FSItem.SetAttributesRequest,
-        on item: FSItem
-    ) async throws -> FSItem.Attributes {
-        throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
+        return try await fs.getAttributes(desiredAttributes, of: item.fileId)
     }
 
     func lookupItem(
@@ -269,15 +264,12 @@ extension MyFSVolume: FSVolume.Operations {
     ) async throws -> (FSItem, FSFileName) {
         // logger.debug("lookupName: \(String(describing: name.string)), \(directory)")
 
-        guard let directory = directory as? FSItemProtocol else {
+        guard let directory = directory as? MyFSItem else {
             throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
         }
 
-        if let item = try directory.getChild(name: name) {
-            return (item, name)
-        } else {
-            throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
-        }
+        let result = try await fs.lookupItem(name, inDirectory: directory.fileId)
+        return (MyFSItem(fileId: result.0), result.1)
     }
 
     func reclaimItem(_ item: FSItem) async throws {
@@ -289,10 +281,18 @@ extension MyFSVolume: FSVolume.Operations {
     func readSymbolicLink(
         _ item: FSItem
     ) async throws -> FSFileName {
-        guard let item = item as? FSItemProtocol else {
+        guard let item = item as? MyFSItem else {
             throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
         }
-        return try item.readSymbolicLink()
+        return try await fs.readSymbolicLink(item.fileId)
+    }
+
+
+    func setAttributes(
+        _ newAttributes: FSItem.SetAttributesRequest,
+        on item: FSItem
+    ) async throws -> FSItem.Attributes {
+        throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
     }
 
     func createItem(
@@ -336,7 +336,7 @@ extension MyFSVolume: FSVolume.Operations {
 
         // }
 
-            throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
+        throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
 
     }
 
@@ -372,7 +372,7 @@ extension MyFSVolume: FSVolume.Operations {
 // extension MyFSVolume: FSVolume.OpenCloseOperations {
 
 //     func openItem(_ item: FSItem, modes: FSVolume.OpenModes) async throws {
-//         if let item = item as? FSItemProtocol {
+//         if let item = item as? MyFSItem {
 //             logger.debug("open: \(item.name)")
 //         } else {
 //             logger.debug("open: \(item)")
@@ -380,7 +380,7 @@ extension MyFSVolume: FSVolume.Operations {
 //     }
 
 //     func closeItem(_ item: FSItem, modes: FSVolume.OpenModes) async throws {
-//         if let item = item as? FSItemProtocol {
+//         if let item = item as? MyFSItem {
 //             logger.debug("close: \(item.name)")
 //         } else {
 //             logger.debug("close: \(item)")
@@ -388,19 +388,20 @@ extension MyFSVolume: FSVolume.Operations {
 //     }
 // }
 
+@available(macOS 15.4, *)
 extension MyFSVolume: FSVolume.ReadWriteOperations {
     func read(
         from item: FSItem, at offset: off_t, length: Int, into buffer: FSMutableFileDataBuffer
     ) async throws -> Int {
-        guard let item = item as? FSItemProtocol else {
+        guard let item = item as? MyFSItem else {
             throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
         }
-        return try item.readData(offset: offset, length: length, into: buffer)
+        return try await fs.readData(item.fileId, offset: offset, length: length, into: buffer)
     }
 
     func write(contents: Data, to item: FSItem, at offset: off_t) async throws -> Int {
         throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
-        // guard let item = item as? WriteFSItemProtocol else {
+        // guard let item = item as? MyFSItem else {
         //     throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
         // }
         // return try item.writeData(contents: contents, offset: offset)
