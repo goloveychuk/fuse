@@ -151,9 +151,9 @@ extension Permissions {
 }
 
 enum ZipID {
-    case file(entryId: Int,  permissions: Permissions)
-    case symlink(entryId: Int)
-    case dir(listingId: Int)
+    case file(entryId: UInt)
+    case symlink(entryId: UInt)
+    case dir(listingId: UInt)
     static var root: ZipID {
         return .dir(listingId: 0)
     }
@@ -262,6 +262,7 @@ struct MinEntry {
     let localHeaderOffset: UInt32
     let compressedSize: UInt32
     let size: UInt32
+    let permissions: Permissions
     // let isSymbolicLink: Bool
     let compressionMethod: CompressionMethod
     // let symlinkName: FSFileName?  //only for symlink
@@ -293,7 +294,7 @@ class ListableZip {
             guard case .dir(let listingId) = currentId else {
                 throw ZipError.invalidListing("Invalid path, not dir")
             }
-            let list = listings[listingId]
+            let list = listings[Int(listingId)]
             guard let childId = list[part.filename] else {
                 throw ZipError.invalidListing("Invalid path, cannot found child \(part)")
             }
@@ -306,7 +307,7 @@ class ListableZip {
         guard case .dir(let index) = forId else {
             return Indexed() //todo throw
         }
-        return listings[index]
+        return listings[Int(index)]
     }
 
     func getEntry(index: Int) -> MinEntry {
@@ -378,6 +379,17 @@ class ListableZip {
 
     }
 
+    func getParentForZipID(zipID: ZipID) -> ZipID? {
+        return nil //todo impl
+        // switch zipID {
+        // case .dir(let listingId):
+        //     return .dir(listingId: listingId - 1)
+        // case .file(let entryId), .symlink(let entryId):
+        //     return .dir(listingId: entryId)
+        // }
+    }
+
+
     init(fileURL: URL) throws {
         self.fileURL = fileURL
         let entries = try ListableZip.readZipEntries(fileURL: fileURL)
@@ -389,7 +401,7 @@ class ListableZip {
             if nameToIndMap[parent] != nil {
                 throw ZipError.invalidListing("Directory already exists")
             }
-            let newIndex = ZipID.dir(listingId: listings.count)
+            let newIndex = ZipID.dir(listingId: UInt(listings.count))
             nameToIndMap[parent] = listings.count
             listings.append(Indexed())
             return newIndex
@@ -416,14 +428,15 @@ class ListableZip {
                         localHeaderOffset: entry.localHeaderOffset,
                         compressedSize: entry.compressedSize,
                         size: entry.size,
-                        compressionMethod: entry.compressionMethod
+                        permissions: Permissions(fromUnsafe: entry.linuxAttributes),
+                        compressionMethod: entry.compressionMethod,
                     )
                 )
-                let permissions = Permissions(fromUnsafe: entry.linuxAttributes)
+
                 if entry.isSymbolicLink {
-                    zipID = ZipID.symlink(entryId: ind)
+                    zipID = ZipID.symlink(entryId: UInt(ind))
                 } else {
-                    zipID = ZipID.file(entryId: ind, permissions: permissions)
+                    zipID = ZipID.file(entryId: UInt(ind))
                 }
             }
             let (parent, name) = entry.name.splitPathParent()
