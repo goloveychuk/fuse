@@ -209,6 +209,7 @@ extension MyFSVolume: FSVolume.Operations {
 
         do {
             self.fs = try FileSystem(manifestPath: path)
+            // self.fs.
             return MyFSItem(fileId: .rootDirectory)
 
         } catch {
