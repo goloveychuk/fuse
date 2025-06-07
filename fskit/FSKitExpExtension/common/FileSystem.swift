@@ -159,6 +159,10 @@ public class FileSystem {
         }
     }
 
+    public func getRootIdentifier() -> FSItem.Identifier {
+        return getNodeId(rootNodeInd: 0, zipId: nil)
+    }
+
     private func getNodeId(rootNodeInd: UInt, zipId: ZipID?) -> FSItem.Identifier {
         var type: UInt
         var zipInd: UInt
@@ -188,7 +192,11 @@ public class FileSystem {
     private func getAttributesForRootNode(node: RootNode) -> FSItem.Attributes {
         let attr = FSItem.Attributes()
         attr.fileID = getNodeId(rootNodeInd: node.rootNodeInd, zipId: nil)
-        attr.parentID = getNodeId(rootNodeInd: node.parentInd, zipId: nil)
+        if attr.fileID == .rootDirectory {
+            attr.parentID = .parentOfRoot
+        } else {
+            attr.parentID = getNodeId(rootNodeInd: node.parentInd, zipId: nil)
+        }
         attr.uid = uid
         attr.gid = gid
         switch node.node {
