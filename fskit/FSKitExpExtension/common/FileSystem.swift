@@ -331,31 +331,33 @@ public class FileSystem {
     ) async throws -> FSDirectoryVerifier {
         let nodeData = getNodeByFileId(directory)
         let version = UInt64(0)  //todo
-
+        var currentOffset = UInt64(0)
 
         let attributes = try getAttributesForNodeData(nodeData: nodeData)
-        if cookie.rawValue < 1 {
+        if cookie.rawValue <= currentOffset {
             guard
                 packer.packEntry(
                     name: FSFileName(string: "."), itemType: .directory, itemID: directory,
-                    nextCookie: FSDirectoryCookie(1), attributes: attributes)
+                    nextCookie: FSDirectoryCookie(currentOffset + 1), attributes: attributes)
             else {
                 return FSDirectoryVerifier(version)
             }
+            currentOffset += 1
         }
 
-        if cookie.rawValue < 2 {
+        if cookie.rawValue <= currentOffset {
             guard
                 packer.packEntry(
                     name: FSFileName(string: ".."), itemType: .directory,
-                    itemID: attributes.parentID, nextCookie: FSDirectoryCookie(2),
+                    itemID: attributes.parentID, nextCookie: FSDirectoryCookie(currentOffset + 1),
                     attributes: nil  // I don't think it's needed, check
                 )
             else {
                 return FSDirectoryVerifier(version)
             }
+            currentOffset += 1
         }
-        var currentOffset = 2
+        
 
         let childrenData = try getChildrenData(nodeData: nodeData)
 
