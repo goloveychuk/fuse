@@ -17,7 +17,7 @@ struct Indexed<T> {
     }
 
     func entries() -> [(Key, T)] {
-        return items.map { (FSFileName(data: $0.key), $0.value) }
+        return items.lazy.map { (FSFileName(data: $0.key), $0.value) } //todo ceheck lazy
     }
 
     // private func findIndex(for key: Key) -> Int? {

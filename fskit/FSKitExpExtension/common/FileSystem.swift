@@ -268,10 +268,28 @@ public class FileSystem {
         _ name: FSFileName,
         inDirectory directory: FSItem.Identifier
     ) async throws -> (FSItem.Identifier, FSFileName) {
+        // todo . and ..?
         let nodeData = getNodeByFileId(directory)
+        let childrenData = try getChildrenData(nodeData: nodeData)
 
-        // let identifier = FSItem.Identifier(rawValue: 0)!  //todo
-        return (identifier, name)
+        if let children = childrenData.children {
+            guard let strName = name.string else {
+                throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
+            }
+            if let child = children[strName] {
+                let identifier = getNodeId(rootNodeInd: child.rootNodeInd, zipId: nil)
+                return (identifier, name)
+            }
+        }
+        if let (zipInfo, zipId) = childrenData.childrenForZipId {
+            let zipEntries = try getZipChildren(zipInfo: zipInfo, zipId: zipId)
+            if let child = zipEntries[name] {
+                let identifier = getNodeId(rootNodeInd: nodeData.rootNode.rootNodeInd, zipId: child)
+                return (identifier, name)
+            }
+        }
+
+        throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
     }
 
     private func getChildrenData(nodeData: Inode) throws -> (
@@ -294,6 +312,14 @@ public class FileSystem {
             return (children, nil)
         }
     }
+
+    private func getZipChildren(zipInfo: ZipInfo, zipId: ZipID) throws -> Indexed<ZipID> {
+        let cachedZip = zipInfo.cachedZip
+        let zip = try cachedZip.get()
+        let zipEntries = zip.getChildren(forId: zipId)
+        return zipEntries
+    }
+
     public func enumerateDirectory(
         directory: FSItem.Identifier,
         startingAt cookie: FSDirectoryCookie,
@@ -305,90 +331,91 @@ public class FileSystem {
         let nodeData = getNodeByFileId(directory)
         let version = UInt64(0)  //todo
 
-        switch nodeData.rootNode.node {
-        case .softLink(_):
-            return verifier
-        case .zip(_, let children), .dirPortal(_, let children), .nestedDir(let children):
-            let attributes = try getAttributesForNodeData(nodeData: nodeData)
-            if cookie.rawValue < 1 {
-                guard
-                    packer.packEntry(
-                        name: FSFileName(string: "."), itemType: .directory, itemID: directory,
-                        nextCookie: FSDirectoryCookie(1), attributes: attributes)
-                else {
+
+        let attributes = try getAttributesForNodeData(nodeData: nodeData)
+        if cookie.rawValue < 1 {
+            guard
+                packer.packEntry(
+                    name: FSFileName(string: "."), itemType: .directory, itemID: directory,
+                    nextCookie: FSDirectoryCookie(1), attributes: attributes)
+            else {
+                return FSDirectoryVerifier(version)
+            }
+        }
+
+        if cookie.rawValue < 2 {
+            guard
+                packer.packEntry(
+                    name: FSFileName(string: ".."), itemType: .directory,
+                    itemID: attributes.parentID, nextCookie: FSDirectoryCookie(2),
+                    attributes: nil  // I don't think it's needed, check
+                )
+            else {
+                return FSDirectoryVerifier(version)
+            }
+        }
+        var currentOffset = 2
+
+        let childrenData = try getChildrenData(nodeData: nodeData)
+
+
+        if let children = childrenData.children {
+            for (name, child) in children {
+                defer {
+                    currentOffset += 1
+                }
+                if currentOffset < cookie.rawValue {
+                    continue
+                }
+
+                let attributes = getAttributesForRootNode(node: child)
+                let ok = packer.packEntry(
+                    name: FSFileName(string: name),
+                    itemType: attributes.type,
+                    itemID: attributes.fileID,
+                    nextCookie: FSDirectoryCookie(UInt64(currentOffset + 1)),
+                    attributes: attributes,
+                )
+
+                if !ok {
+                    // fskit dont't want to continue
                     return FSDirectoryVerifier(version)
-                }
-            }
-
-            if cookie.rawValue < 2 {
-                guard
-                    packer.packEntry(
-                        name: FSFileName(string: ".."), itemType: .directory,
-                        itemID: attributes.parentID, nextCookie: FSDirectoryCookie(2),
-                        attributes: nil  // I don't think it's needed, check
-                    )
-                else {
-                    return FSDirectoryVerifier(version)
-                }
-            }
-            var currentOffset = 2
-
-            let childrenData = try getChildrenData(nodeData: nodeData)
-
-            if let children = childrenData.children {
-                for (name, child) in children {
-                    defer {
-                        currentOffset += 1
-                    }
-                    if currentOffset < cookie.rawValue {
-                        continue
-                    }
-
-                    let attributes = getAttributesForRootNode(node: child)
-                    let ok = packer.packEntry(
-                        name: FSFileName(string: name),
-                        itemType: attributes.type,
-                        itemID: attributes.fileID,
-                        nextCookie: FSDirectoryCookie(UInt64(currentOffset + 1)),
-                        attributes: attributes,
-                    )
-
-                    if !ok {
-                        // fskit dont't want to continue
-                        return FSDirectoryVerifier(version)
-                    }
-                }
-            }
-
-            if let (zipInfo, zipId) = childrenData.childrenForZipId {
-                let cachedZip = zipInfo.cachedZip
-                let zip = try cachedZip.get()
-                let zipEntries = zip.getChildren(forId: zipId)
-                for (name, zipId) in zipEntries.entries() {
-                    defer {
-                        currentOffset += 1
-                    }
-                    if currentOffset < cookie.rawValue {
-                        continue
-                    }
-                    let attributes = try getAttributesForZipID(
-                        zipId: zipId, rootNode: nodeData.rootNode)
-                    let ok = packer.packEntry(
-                        name: name,
-                        itemType: attributes.type,
-                        itemID: attributes.fileID,
-                        nextCookie: FSDirectoryCookie(UInt64(currentOffset + 1)),
-                        attributes: attributes,
-                    )
-
-                    if !ok {
-                        // fskit dont't want to continue
-                        return FSDirectoryVerifier(version)
-
-                    }
                 }
             }
         }
+
+        if let (zipInfo, zipId) = childrenData.childrenForZipId {
+            let zipEntries = try getZipChildren(zipInfo: zipInfo, zipId: zipId)
+            for (name, zipId) in zipEntries.entries() {
+                if let children = childrenData.children {
+                    if children[name.string!] != nil {
+                        continue
+                    }
+                }
+                defer {
+                    currentOffset += 1
+                }
+                if currentOffset < cookie.rawValue {
+                    continue
+                }
+                let attributes = try getAttributesForZipID(
+                    zipId: zipId, rootNode: nodeData.rootNode)
+                let ok = packer.packEntry(
+                    name: name,
+                    itemType: attributes.type,
+                    itemID: attributes.fileID,
+                    nextCookie: FSDirectoryCookie(UInt64(currentOffset + 1)),
+                    attributes: attributes,
+                )
+
+                if !ok {
+                    // fskit dont't want to continue
+                    return FSDirectoryVerifier(version)
+
+                }
+            }
+        }
+
         return FSDirectoryVerifier(version)
 
     }
