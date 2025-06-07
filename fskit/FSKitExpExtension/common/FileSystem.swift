@@ -21,7 +21,7 @@ private struct RootNode {
     let rootNodeInd: UInt
     let parentInd: UInt
     let node: RootNodeData
-    
+
 }
 
 class FileIdEncoder {
@@ -90,7 +90,6 @@ public class FileSystem {
     private var zipCache = [PathSegment: CachedZip]()
     private let fileIdEncoder = FileIdEncoder()
 
-
     init(manifestPath: String) throws {
         let data = try Data(contentsOf: URL(filePath: manifestPath))
         let depTree = try DependencyNode.fromJSONData(data)
@@ -98,7 +97,7 @@ public class FileSystem {
         _ = visit(dependencyNode: depTree, parentInd: 0)
     }
 
-    private func visitChildren(children: Children, parentInd: UInt) -> [PathSegment:RootNode] {
+    private func visitChildren(children: Children, parentInd: UInt) -> [PathSegment: RootNode] {
         return children.mapValues { child in
             visit(dependencyNode: child, parentInd: parentInd)
         }
@@ -125,11 +124,15 @@ public class FileSystem {
                 zipCache[info.zipPath] = cachedZip
                 zipInfo = (cachedZip, subpath: info.subpath)
             }
-            nodeData = .zip(zipInfo: zipInfo, children: visitChildren(children: children, parentInd: rootNodeInd))
+            nodeData = .zip(
+                zipInfo: zipInfo,
+                children: visitChildren(children: children, parentInd: rootNodeInd))
         case .dirPortal(let target, let children):
-            nodeData = .dirPortal(target: target, children: visitChildren(children: children, parentInd: rootNodeInd))
+            nodeData = .dirPortal(
+                target: target, children: visitChildren(children: children, parentInd: rootNodeInd))
         case .nestedDir(let children):
-            nodeData = .nestedDir(children: visitChildren(children: children, parentInd: rootNodeInd))
+            nodeData = .nestedDir(
+                children: visitChildren(children: children, parentInd: rootNodeInd))
         }
 
         let rootNode = RootNode(
@@ -269,7 +272,27 @@ public class FileSystem {
 
         // let identifier = FSItem.Identifier(rawValue: 0)!  //todo
         return (identifier, name)
+    }
 
+    private func getChildrenData(nodeData: Inode) throws -> (
+        children: [PathSegment: RootNode]?, childrenForZipId: (ZipInfo, ZipID)?
+    ) {
+        switch nodeData.rootNode.node {
+        case .softLink(_):
+            return (nil, nil)
+        case .zip(let zipInfo, let children):
+            if let zipId = nodeData.zipId {
+                return (nil, (zipInfo, zipId))
+            } else {
+                let zipId = try zipInfo.cachedZip.get().getIdForPath(
+                    path: ZipPath(path: zipInfo.subpath))
+                return (children, (zipInfo, zipId))
+            }
+        case .dirPortal(_, let children):
+            return (children, nil)
+        case .nestedDir(let children):
+            return (children, nil)
+        }
     }
     public func enumerateDirectory(
         directory: FSItem.Identifier,
@@ -310,15 +333,9 @@ public class FileSystem {
             }
             var currentOffset = 2
 
+            let childrenData = try getChildrenData(nodeData: nodeData)
 
-            var childrenForZipId: ZipID?
-            
-            if nodeData.zipId == nil {
-                if case .zip(let zipInfo, _) = nodeData.rootNode.node {
-                    childrenForZipId = try zipInfo.cachedZip.get().getIdForPath(
-                        path: ZipPath(path: zipInfo.subpath))
-                }
-
+            if let children = childrenData.children {
                 for (name, child) in children {
                     defer {
                         currentOffset += 1
@@ -341,37 +358,33 @@ public class FileSystem {
                         return FSDirectoryVerifier(version)
                     }
                 }
-            } else {
-                childrenForZipId = nodeData.zipId
             }
 
-            if let zipId = childrenForZipId {
-                if case .zip(let zipInfo, _) = nodeData.rootNode.node {
-                    let cachedZip = zipInfo.cachedZip
-                    let zip = try cachedZip.get()
-                    let zipEntries = zip.getChildren(forId: zipId)
-                    for (name, zipId) in zipEntries.entries() {
-                        defer {
-                            currentOffset += 1
-                        }
-                        if currentOffset < cookie.rawValue {
-                            continue
-                        }
-                        let attributes = try getAttributesForZipID(
-                            zipId: zipId, rootNode: nodeData.rootNode)
-                        let ok = packer.packEntry(
-                            name: name,
-                            itemType: attributes.type,
-                            itemID: attributes.fileID,
-                            nextCookie: FSDirectoryCookie(UInt64(currentOffset + 1)),
-                            attributes: attributes,
-                        )
+            if let (zipInfo, zipId) = childrenData.childrenForZipId {
+                let cachedZip = zipInfo.cachedZip
+                let zip = try cachedZip.get()
+                let zipEntries = zip.getChildren(forId: zipId)
+                for (name, zipId) in zipEntries.entries() {
+                    defer {
+                        currentOffset += 1
+                    }
+                    if currentOffset < cookie.rawValue {
+                        continue
+                    }
+                    let attributes = try getAttributesForZipID(
+                        zipId: zipId, rootNode: nodeData.rootNode)
+                    let ok = packer.packEntry(
+                        name: name,
+                        itemType: attributes.type,
+                        itemID: attributes.fileID,
+                        nextCookie: FSDirectoryCookie(UInt64(currentOffset + 1)),
+                        attributes: attributes,
+                    )
 
-                        if !ok {
-                            // fskit dont't want to continue
-                            return FSDirectoryVerifier(version)
+                    if !ok {
+                        // fskit dont't want to continue
+                        return FSDirectoryVerifier(version)
 
-                        }
                     }
                 }
             }
@@ -385,7 +398,7 @@ public class FileSystem {
         let nodeData = getNodeByFileId(fileID)
         if let zipId = nodeData.zipId {
             guard case .zip(let zipInfo, _) = nodeData.rootNode.node else {
-               throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+                throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
             }
             if case .symlink(let entryInd) = zipId {
                 let data = try readFileToBuffer(
@@ -417,7 +430,8 @@ public class FileSystem {
     }
 
     func readData(
-        _ fileID: FSItem.Identifier, offset: off_t, length: Int, into buffer: FSMutableFileDataBuffer
+        _ fileID: FSItem.Identifier, offset: off_t, length: Int,
+        into buffer: FSMutableFileDataBuffer
     ) async throws -> Int {
         let nodeData = getNodeByFileId(fileID)
 
