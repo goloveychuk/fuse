@@ -107,7 +107,8 @@ public class FileSystem {
         dependencyNode: DependencyNode, parentInd: UInt
     ) -> RootNode {
         let rootNodeInd = UInt(rootNodes.count)
-
+        //this is a hack, because idk how to make holes in array, will be replaced later.
+        rootNodes.append(RootNode(rootNodeInd: UInt.max, parentInd: UInt.max, node: .nestedDir(children: [:]) ))
         let nodeData: RootNodeData
 
         switch dependencyNode {
@@ -137,12 +138,12 @@ public class FileSystem {
 
         let rootNode = RootNode(
             rootNodeInd: rootNodeInd, parentInd: parentInd, node: nodeData)
-        rootNodes.append(rootNode)
+        rootNodes[Int(rootNodeInd)] = rootNode
         return rootNode
     }
 
     private func getNodeByFileId(_ fileid: FSItem.Identifier) -> Inode {
-        let (rootNodeInd, type, zipInd) = fileIdEncoder.decodeTuple(encoded: fileid.rawValue)
+        let (rootNodeInd, type, zipInd) = fileIdEncoder.decodeTuple(encoded: fileid.rawValue - FSItem.Identifier.rootDirectory.rawValue)
         let rootNode = rootNodes[Int(rootNodeInd)]
         switch type {
         case 1:
@@ -177,11 +178,11 @@ public class FileSystem {
         }
         let fileId = fileIdEncoder.encodeTuple(value1: rootNodeInd, value2: type, value3: zipInd)
         // todo check
-        if FSItem.Identifier.rootDirectory.rawValue != 0 {
-            fatalError("FSItem.Identifier.rootDirectory is not 0")
-        }
-        // fileId = fileId + FSItem.Identifier.rootDirectory.rawValue
-        return FSItem.Identifier(rawValue: fileId)!
+        // if FSItem.Identifier.rootDirectory.rawValue != 0 {
+        //     fatalError("FSItem.Identifier.rootDirectory is not 0")
+        // }
+        // root node should be 0
+        return FSItem.Identifier(rawValue: fileId + FSItem.Identifier.rootDirectory.rawValue)! //check overflow
     }
 
     private func getAttributesForRootNode(node: RootNode) -> FSItem.Attributes {

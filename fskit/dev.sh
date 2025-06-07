@@ -1,1 +1,1 @@
-hdiutil attach -imagekey diskimage-class=CRawDiskImage -nomount dummyd
+hdiutil attach -imagekey diskimage-class=CRawDiskImage -nomount dummy
