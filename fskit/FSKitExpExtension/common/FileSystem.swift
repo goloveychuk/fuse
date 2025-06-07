@@ -1,7 +1,7 @@
 import FSKit
 import Foundation
 
-private struct NodeData {
+private struct Inode {
     let rootNode: RootNode
     let zipId: ZipID?
 }
@@ -9,12 +9,19 @@ private struct NodeData {
 private let uid = getuid()
 private let gid = getgid()
 
+private enum RootNodeData {
+    case softLink(data: String)
+    case zip(zipInfo: ZipInfo, children: [PathSegment: RootNode])
+    case dirPortal(target: String, children: [PathSegment: RootNode])
+    case nestedDir(children: [PathSegment: RootNode])
+}
+
 private struct RootNode {
     // let fileId: FSItem.Identifier
     let rootNodeInd: UInt
     let parentInd: UInt
-    let node: DependencyNode
-    let zipInfo: ZipInfo?
+    let node: RootNodeData
+    
 }
 
 class FileIdEncoder {
@@ -77,7 +84,7 @@ class FileIdEncoder {
 
 }
 
-public class FileSystem: FSVolume, @unchecked Sendable {
+public class FileSystem {
 
     private var rootNodes = [RootNode]()
     private var zipCache = [PathSegment: CachedZip]()
@@ -88,26 +95,28 @@ public class FileSystem: FSVolume, @unchecked Sendable {
         let data = try Data(contentsOf: URL(filePath: manifestPath))
         let depTree = try DependencyNode.fromJSONData(data)
 
-        visit(dependencyNode: depTree, parentInd: 0)
+        _ = visit(dependencyNode: depTree, parentInd: 0)
     }
 
-    private func visitChildren(children: Children, parentInd: UInt) {
-        for child in children {
-            visit(dependencyNode: child.value, parentInd: parentInd)
+    private func visitChildren(children: Children, parentInd: UInt) -> [PathSegment:RootNode] {
+        return children.mapValues { child in
+            visit(dependencyNode: child, parentInd: parentInd)
         }
     }
 
     private func visit(
         dependencyNode: DependencyNode, parentInd: UInt
-    ) {
+    ) -> RootNode {
         let rootNodeInd = UInt(rootNodes.count)
 
-        var zipInfo: ZipInfo?
+        let nodeData: RootNodeData
 
         switch dependencyNode {
-        case .softLink(_):
+        case .softLink(let data):
+            nodeData = .softLink(data: data)
             break
         case .zip(let info, let children):
+            let zipInfo: ZipInfo
             if let cachedZip = zipCache[info.zipPath] {
                 zipInfo = (cachedZip, subpath: info.subpath)
                 cachedZip.refCount += 1
@@ -116,29 +125,31 @@ public class FileSystem: FSVolume, @unchecked Sendable {
                 zipCache[info.zipPath] = cachedZip
                 zipInfo = (cachedZip, subpath: info.subpath)
             }
-            visitChildren(children: children, parentInd: rootNodeInd)
-        case .dirPortal(_, let children), .nestedDir(let children):
-            visitChildren(children: children, parentInd: rootNodeInd)
+            nodeData = .zip(zipInfo: zipInfo, children: visitChildren(children: children, parentInd: rootNodeInd))
+        case .dirPortal(let target, let children):
+            nodeData = .dirPortal(target: target, children: visitChildren(children: children, parentInd: rootNodeInd))
+        case .nestedDir(let children):
+            nodeData = .nestedDir(children: visitChildren(children: children, parentInd: rootNodeInd))
         }
 
-        rootNodes.append(
-            RootNode(
-                rootNodeInd: rootNodeInd, parentInd: parentInd, node: dependencyNode,
-                zipInfo: zipInfo))
+        let rootNode = RootNode(
+            rootNodeInd: rootNodeInd, parentInd: parentInd, node: nodeData)
+        rootNodes.append(rootNode)
+        return rootNode
     }
 
-    private func getNodeByFileId(_ fileid: FSItem.Identifier) -> NodeData {
+    private func getNodeByFileId(_ fileid: FSItem.Identifier) -> Inode {
         let (rootNodeInd, type, zipInd) = fileIdEncoder.decodeTuple(encoded: fileid.rawValue)
         let rootNode = rootNodes[Int(rootNodeInd)]
         switch type {
         case 1:
-            return NodeData(rootNode: rootNode, zipId: .file(entryId: zipInd))
+            return Inode(rootNode: rootNode, zipId: .file(entryId: zipInd))
         case 2:
-            return NodeData(rootNode: rootNode, zipId: .symlink(entryId: zipInd))
+            return Inode(rootNode: rootNode, zipId: .symlink(entryId: zipInd))
         case 3:
-            return NodeData(rootNode: rootNode, zipId: .dir(listingId: zipInd))
+            return Inode(rootNode: rootNode, zipId: .dir(listingId: zipInd))
         case 0:
-            return NodeData(rootNode: rootNode, zipId: nil)
+            return Inode(rootNode: rootNode, zipId: nil)
         default:
             fatalError("Invalid type: \(type)")
         }
@@ -193,7 +204,7 @@ public class FileSystem: FSVolume, @unchecked Sendable {
         }
     }
 
-    private func getAttributesForNodeData(nodeData: NodeData) throws -> FSItem.Attributes {
+    private func getAttributesForNodeData(nodeData: Inode) throws -> FSItem.Attributes {
         var attributes: FSItem.Attributes
         if let zipId = nodeData.zipId {
             attributes = try getAttributesForZipID(
@@ -207,8 +218,10 @@ public class FileSystem: FSVolume, @unchecked Sendable {
     private func getAttributesForZipID(zipId: ZipID, rootNode: RootNode) throws -> FSItem.Attributes
     {
         let attr = FSItem.Attributes()
-
-        let cachedZip = rootNode.zipInfo!.cachedZip
+        guard case .zip(let zipInfo, _) = rootNode.node else {
+            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        }
+        let cachedZip = zipInfo.cachedZip
         let listableZip = try cachedZip.get()
         let zipParent = listableZip.getParentForZipID(zipID: zipId)
 
@@ -254,7 +267,7 @@ public class FileSystem: FSVolume, @unchecked Sendable {
     ) async throws -> (FSItem.Identifier, FSFileName) {
         let nodeData = getNodeByFileId(directory)
 
-
+        // let identifier = FSItem.Identifier(rawValue: 0)!  //todo
         return (identifier, name)
 
     }
@@ -270,7 +283,7 @@ public class FileSystem: FSVolume, @unchecked Sendable {
         let version = UInt64(0)  //todo
 
         switch nodeData.rootNode.node {
-        case .softLink(let data):
+        case .softLink(_):
             return verifier
         case .zip(_, let children), .dirPortal(_, let children), .nestedDir(let children):
             let attributes = try getAttributesForNodeData(nodeData: nodeData)
@@ -297,13 +310,13 @@ public class FileSystem: FSVolume, @unchecked Sendable {
             }
             var currentOffset = 2
 
-            let zipInfo = nodeData.rootNode.zipInfo
+
             var childrenForZipId: ZipID?
             
             if nodeData.zipId == nil {
-                if case .zip(_, _) = nodeData.rootNode.node {
-                    childrenForZipId = try zipInfo!.cachedZip.get().getIdForPath(
-                        path: ZipPath(path: zipInfo!.subpath))
+                if case .zip(let zipInfo, _) = nodeData.rootNode.node {
+                    childrenForZipId = try zipInfo.cachedZip.get().getIdForPath(
+                        path: ZipPath(path: zipInfo.subpath))
                 }
 
                 for (name, child) in children {
@@ -333,8 +346,8 @@ public class FileSystem: FSVolume, @unchecked Sendable {
             }
 
             if let zipId = childrenForZipId {
-                if case .zip(_, _) = nodeData.rootNode.node {
-                    let cachedZip = zipInfo!.cachedZip
+                if case .zip(let zipInfo, _) = nodeData.rootNode.node {
+                    let cachedZip = zipInfo.cachedZip
                     let zip = try cachedZip.get()
                     let zipEntries = zip.getChildren(forId: zipId)
                     for (name, zipId) in zipEntries.entries() {
@@ -371,9 +384,12 @@ public class FileSystem: FSVolume, @unchecked Sendable {
 
         let nodeData = getNodeByFileId(fileID)
         if let zipId = nodeData.zipId {
+            guard case .zip(let zipInfo, _) = nodeData.rootNode.node else {
+               throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+            }
             if case .symlink(let entryInd) = zipId {
                 let data = try readFileToBuffer(
-                    entryInd: entryInd, cachedZip: nodeData.rootNode.zipInfo!.cachedZip)
+                    entryInd: entryInd, cachedZip: zipInfo.cachedZip)
                 return FSFileName(data: data)
             }
         } else {
@@ -408,17 +424,20 @@ public class FileSystem: FSVolume, @unchecked Sendable {
         guard let zipId = nodeData.zipId else {
             throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
         }
+        guard case .zip(let zipInfo, _) = nodeData.rootNode.node else {
+            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        }
         switch zipId {
         case .symlink(_):
             throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
 
         case .file(let entryInd):
-            let listableZip = try nodeData.rootNode.zipInfo!.cachedZip.get()
+            let listableZip = try zipInfo.cachedZip.get()
             let zipEntry = listableZip.getEntry(index: entryInd)
             switch zipEntry.compressionMethod {
             case .deflate:
                 let compressedData = try readFileToBuffer(
-                    entryInd: entryInd, cachedZip: nodeData.rootNode.zipInfo!.cachedZip)
+                    entryInd: entryInd, cachedZip: zipInfo.cachedZip)
 
                 // Create a temporary buffer for decompressed data
                 let destinationSize = Int(zipEntry.size)
