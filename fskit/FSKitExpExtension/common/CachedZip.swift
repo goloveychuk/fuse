@@ -1,6 +1,7 @@
 import Foundation
+import Synchronization
 
-
+let maxAge = TimeInterval(30)
 class CachedZip: @unchecked Sendable {
     private var rwlock: pthread_rwlock_t = pthread_rwlock_t()
     var refCount: UInt32
@@ -9,6 +10,7 @@ class CachedZip: @unchecked Sendable {
         case loaded(ListableZip)
         case error(Error)
     }
+    let lastUsedTime = Atomic<TimeInterval>(0)
     private var state: ZipState = .notLoaded
     let zipPath: String
 
@@ -22,13 +24,22 @@ class CachedZip: @unchecked Sendable {
         pthread_rwlock_destroy(&rwlock)
     }
 
-    func clear() {
+    private func clear() {
         pthread_rwlock_wrlock(&rwlock)
         self.state = .notLoaded  // todo check errored
         pthread_rwlock_unlock(&rwlock)
     }
 
+    func cleanIfNeeded() {
+        let now = Date().timeIntervalSince1970
+        let lastUsed = lastUsedTime.load(ordering: .relaxed)
+        if now - lastUsed > maxAge {
+            clear()
+        }
+    }
+
     func get() throws -> ListableZip {
+        lastUsedTime.store(Date().timeIntervalSince1970, ordering: .relaxed)
         pthread_rwlock_rdlock(&rwlock)
 
         switch state {
