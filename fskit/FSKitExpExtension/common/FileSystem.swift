@@ -102,11 +102,23 @@ public class FileSystem {
         let depTree = try DependencyNode.fromJSONData(data)
 
         _ = visit(dependencyNode: depTree, parentInd: 0)
+        startCleaningWorker()
     }
 
     private func visitChildren(children: Children, parentInd: UInt) -> [PathSegment: RootNode] {
         return children.mapValues { child in
             visit(dependencyNode: child, parentInd: parentInd)
+        }
+    }
+
+    private func startCleaningWorker() {
+        Task {
+            while true {
+                try await Task.sleep(for: .seconds(20))
+                for (_, cachedZip) in zipCache {
+                    cachedZip.cleanIfNeeded()
+                }
+            }
         }
     }
 
