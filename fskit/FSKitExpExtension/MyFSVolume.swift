@@ -18,37 +18,37 @@ class MyFSItem: FSItem {
     }    
 }
 
-// extension FSItem.GetAttributesRequest {
-//     var printRequestedAttributes: String {
-//         var result = ""
-//         let map = [
-//             "type": FSItem.Attribute.type,
-//             "mode": FSItem.Attribute.mode,
-//             "linkCount": FSItem.Attribute.linkCount,
-//             "uid": FSItem.Attribute.uid,
-//             "gid": FSItem.Attribute.gid,
-//             "flags": FSItem.Attribute.flags,
-//             "size": FSItem.Attribute.size,
-//             "allocSize": FSItem.Attribute.allocSize,
-//             "fileID": FSItem.Attribute.fileID,
-//             "parentID": FSItem.Attribute.parentID,
-//             "accessTime": FSItem.Attribute.accessTime,
-//             "modifyTime": FSItem.Attribute.modifyTime,
-//             "changeTime": FSItem.Attribute.changeTime,
-//             "birthTime": FSItem.Attribute.birthTime,
-//             "backupTime": FSItem.Attribute.backupTime,
-//             "addedTime": FSItem.Attribute.addedTime,
-//             "supportsLimitedXAttrs": FSItem.Attribute.supportsLimitedXAttrs,
-//             "inhibitKernelOffloadedIO": FSItem.Attribute.inhibitKernelOffloadedIO,
-//         ]
-//         for (key, value) in map {
-//             if self.isAttributeWanted(value) {
-//                 result += "\(key), "
-//             }
-//         }
-//         return result
-//     }
-// }
+extension FSItem.GetAttributesRequest {
+    var printRequestedAttributes: String {
+        var result = ""
+        let map = [
+            "type": FSItem.Attribute.type,
+            "mode": FSItem.Attribute.mode,
+            "linkCount": FSItem.Attribute.linkCount,
+            "uid": FSItem.Attribute.uid,
+            "gid": FSItem.Attribute.gid,
+            "flags": FSItem.Attribute.flags,
+            "size": FSItem.Attribute.size,
+            "allocSize": FSItem.Attribute.allocSize,
+            "fileID": FSItem.Attribute.fileID,
+            "parentID": FSItem.Attribute.parentID,
+            "accessTime": FSItem.Attribute.accessTime,
+            "modifyTime": FSItem.Attribute.modifyTime,
+            "changeTime": FSItem.Attribute.changeTime,
+            "birthTime": FSItem.Attribute.birthTime,
+            "backupTime": FSItem.Attribute.backupTime,
+            "addedTime": FSItem.Attribute.addedTime,
+            "supportsLimitedXAttrs": FSItem.Attribute.supportsLimitedXAttrs,
+            "inhibitKernelOffloadedIO": FSItem.Attribute.inhibitKernelOffloadedIO,
+        ]
+        for (key, value) in map {
+            if self.isAttributeWanted(value) {
+                result += "\(key), "
+            }
+        }
+        return result
+    }
+}
 
 // func readDirectoryEntriesUsingGetdirentries(fd: Int32) throws -> [(
 //     name: String, type: FSItem.ItemType

@@ -16,6 +16,13 @@ private enum RootNodeData {
     case nestedDir(children: [PathSegment: RootNode])
 }
 
+extension FSItem.GetAttributesRequest {
+    convenience init(_ wantedAttributes: FSItem.Attribute) {
+        self.init()
+        self.wantedAttributes = wantedAttributes
+    }
+}
+
 private struct RootNode {
     // let fileId: FSItem.Identifier
     let rootNodeInd: UInt
@@ -108,7 +115,8 @@ public class FileSystem {
     ) -> RootNode {
         let rootNodeInd = UInt(rootNodes.count)
         //this is a hack, because idk how to make holes in array, will be replaced later.
-        rootNodes.append(RootNode(rootNodeInd: UInt.max, parentInd: UInt.max, node: .nestedDir(children: [:]) ))
+        rootNodes.append(
+            RootNode(rootNodeInd: UInt.max, parentInd: UInt.max, node: .nestedDir(children: [:])))
         let nodeData: RootNodeData
 
         switch dependencyNode {
@@ -143,7 +151,8 @@ public class FileSystem {
     }
 
     private func getNodeByFileId(_ fileid: FSItem.Identifier) -> Inode {
-        let (rootNodeInd, type, zipInd) = fileIdEncoder.decodeTuple(encoded: fileid.rawValue - FSItem.Identifier.rootDirectory.rawValue)
+        let (rootNodeInd, type, zipInd) = fileIdEncoder.decodeTuple(
+            encoded: fileid.rawValue - FSItem.Identifier.rootDirectory.rawValue)
         let rootNode = rootNodes[Int(rootNodeInd)]
         switch type {
         case 1:
@@ -186,78 +195,106 @@ public class FileSystem {
         //     fatalError("FSItem.Identifier.rootDirectory is not 0")
         // }
         // root node should be 0
-        return FSItem.Identifier(rawValue: fileId + FSItem.Identifier.rootDirectory.rawValue)! //check overflow
+        return FSItem.Identifier(rawValue: fileId + FSItem.Identifier.rootDirectory.rawValue)!  //check overflow
     }
 
-    private func getAttributesForRootNode(node: RootNode) -> FSItem.Attributes {
+    private func getAttributesForNodeData(nodeData: Inode, req: FSItem.GetAttributesRequest) throws
+        -> FSItem.Attributes
+    {
+        var attributes: FSItem.Attributes
+        if let zipId = nodeData.zipId {
+            attributes = try getAttributesForZipID(
+                zipId: zipId, rootNode: nodeData.rootNode, req: req)
+        } else {
+            attributes = getAttributesForRootNode(node: nodeData.rootNode, req: req)
+        }
+        return attributes
+    }
+
+    private func getItemType(rootNode: RootNode, zipID: ZipID?) -> FSItem.ItemType {
+        if let zipID = zipID {
+            switch zipID {
+            case .dir(_):
+                return .directory
+            case .file(_):
+                return .file
+            case .symlink(_):
+                return .symlink
+            }
+        } else {
+            switch rootNode.node {
+            case .softLink(_):
+                return .symlink
+            case .zip(_, _), .dirPortal(_, _), .nestedDir(_):
+                return .directory
+            }
+        }
+    }
+
+    private func getAttributesForRootNode(node: RootNode, req: FSItem.GetAttributesRequest)
+        -> FSItem.Attributes
+    {
         let attr = FSItem.Attributes()
         attr.fileID = getNodeId(rootNodeInd: node.rootNodeInd, zipId: nil)
-        if attr.fileID == .rootDirectory {
-            attr.parentID = .parentOfRoot
-        } else {
-            attr.parentID = getNodeId(rootNodeInd: node.parentInd, zipId: nil)
+        if req.isAttributeWanted(.parentID) {
+            if attr.fileID == .rootDirectory {
+                attr.parentID = .parentOfRoot
+            } else {
+                attr.parentID = getNodeId(rootNodeInd: node.parentInd, zipId: nil)
+            }
         }
+        // "uid, modifyTime, fileID, type, mode, flags, accessTime, gid, size, birthTime, "
         attr.uid = uid
         attr.gid = gid
+        attr.type = getItemType(rootNode: node, zipID: nil)
         switch node.node {
         case .softLink(_):
             attr.size = 1
             attr.allocSize = 1
             attr.linkCount = 1
-            attr.type = .symlink
             attr.mode = UInt32(S_IFLNK | 0o644)  //todo get original, because there are executable
             return attr
         case .zip(_, _), .dirPortal(_, _), .nestedDir(_):
             attr.size = 0
             attr.allocSize = 0
-            attr.type = .directory
             attr.mode = UInt32(S_IFDIR | 0o755)  //by default node_modules created with 755
             return attr
         }
     }
+    
 
-    private func getAttributesForNodeData(nodeData: Inode) throws -> FSItem.Attributes {
-        var attributes: FSItem.Attributes
-        if let zipId = nodeData.zipId {
-            attributes = try getAttributesForZipID(
-                zipId: zipId, rootNode: nodeData.rootNode)
-        } else {
-            attributes = getAttributesForRootNode(node: nodeData.rootNode)
-        }
-        return attributes
-    }
-
-    private func getAttributesForZipID(zipId: ZipID, rootNode: RootNode) throws -> FSItem.Attributes
-    {
+    private func getAttributesForZipID(
+        zipId: ZipID, rootNode: RootNode, req: FSItem.GetAttributesRequest
+    ) throws -> FSItem.Attributes {
         let attr = FSItem.Attributes()
         guard case .zip(let zipInfo, _) = rootNode.node else {
             throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
         }
         let cachedZip = zipInfo.cachedZip
         let listableZip = try cachedZip.get()
-        let zipParent = listableZip.getParentForZipID(zipID: zipId)
 
         attr.fileID = getNodeId(rootNodeInd: rootNode.rootNodeInd, zipId: zipId)
-        attr.parentID = getNodeId(rootNodeInd: rootNode.rootNodeInd, zipId: zipParent)
+        if req.isAttributeWanted(.parentID) {
+            let zipParent = listableZip.getParentForZipID(zipID: zipId)
+            attr.parentID = getNodeId(rootNodeInd: rootNode.rootNodeInd, zipId: zipParent)
+        }
         attr.uid = uid
         attr.gid = gid
+        attr.type = getItemType(rootNode: rootNode, zipID: zipId)
         switch zipId {
         case .dir(_):
             attr.size = 0
             attr.allocSize = 0
             attr.linkCount = 1
-            attr.type = .directory
             attr.mode = UInt32(S_IFDIR | 0o755)  //todo get original
         case .symlink(let entryInd):
             let zipEntry = listableZip.getEntry(index: entryInd)
             attr.size = 1
             attr.allocSize = 1
-            attr.type = .symlink
             attr.mode = UInt32(S_IFLNK | zipEntry.permissions)
         case .file(let entryInd):
             let zipEntry = listableZip.getEntry(index: entryInd)
             attr.linkCount = cachedZip.refCount
-            attr.type = .file
             attr.size = UInt64(zipEntry.size)
             attr.allocSize = UInt64(zipEntry.compressedSize)  //todo not sure
             attr.mode = UInt32(S_IFREG | zipEntry.permissions)
@@ -267,10 +304,12 @@ public class FileSystem {
 
     public func getAttributes(
         _ desiredAttributes: FSItem.GetAttributesRequest,
-        of fileId: FSItem.Identifier
+        of fileId: FSItem.Identifier,
     ) async throws -> FSItem.Attributes {
+        // let wanted = desiredAttributes.printRequestedAttributes
+        // "modifyTime, size, birthTime, parentID, type, flags, allocSize, mode, linkCount, changeTime, accessTime, fileID, "
         let nodeData = getNodeByFileId(fileId)
-        return try getAttributesForNodeData(nodeData: nodeData)
+        return try getAttributesForNodeData(nodeData: nodeData, req: desiredAttributes)
     }
 
     public func lookupItem(
@@ -278,6 +317,10 @@ public class FileSystem {
         inDirectory directory: FSItem.Identifier
     ) async throws -> (FSItem.Identifier, FSFileName) {
         // todo . and ..?
+        let strName = name.string!
+        if strName == "." || strName == ".." {
+            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        }
         let nodeData = getNodeByFileId(directory)
         let childrenData = try getChildrenData(nodeData: nodeData)
 
@@ -341,12 +384,12 @@ public class FileSystem {
         let version = UInt64(0)  //todo
         var currentOffset = UInt64(0)
 
-        let attributes = try getAttributesForNodeData(nodeData: nodeData)
+        // let wanted = req?.printRequestedAttributes
         if cookie.rawValue <= currentOffset {
             guard
                 packer.packEntry(
                     name: FSFileName(string: "."), itemType: .directory, itemID: directory,
-                    nextCookie: FSDirectoryCookie(currentOffset + 1), attributes: attributes)
+                    nextCookie: FSDirectoryCookie(currentOffset + 1), attributes: nil)
             else {
                 return FSDirectoryVerifier(version)
             }
@@ -354,6 +397,8 @@ public class FileSystem {
         }
 
         if cookie.rawValue <= currentOffset {
+            let attributes = try getAttributesForNodeData(
+                nodeData: nodeData, req: FSItem.GetAttributesRequest([.parentID]))
             guard
                 packer.packEntry(
                     name: FSFileName(string: ".."), itemType: .directory,
@@ -365,10 +410,8 @@ public class FileSystem {
             }
             currentOffset += 1
         }
-        
 
         let childrenData = try getChildrenData(nodeData: nodeData)
-
 
         if let children = childrenData.children {
             for (name, child) in children {
@@ -379,13 +422,12 @@ public class FileSystem {
                     continue
                 }
 
-                let attributes = getAttributesForRootNode(node: child)
                 let ok = packer.packEntry(
                     name: FSFileName(string: name),
-                    itemType: attributes.type,
-                    itemID: attributes.fileID,
+                    itemType: getItemType(rootNode: child, zipID: nil),
+                    itemID: getNodeId(rootNodeInd: child.rootNodeInd, zipId: nil),
                     nextCookie: FSDirectoryCookie(UInt64(currentOffset + 1)),
-                    attributes: attributes,
+                    attributes: req != nil ? getAttributesForRootNode(node: child, req: req!) : nil,
                 )
 
                 if !ok {
@@ -409,14 +451,15 @@ public class FileSystem {
                 if currentOffset < cookie.rawValue {
                     continue
                 }
-                let attributes = try getAttributesForZipID(
-                    zipId: zipId, rootNode: nodeData.rootNode)
+
                 let ok = packer.packEntry(
                     name: name,
-                    itemType: attributes.type,
-                    itemID: attributes.fileID,
+                    itemType: getItemType(rootNode: nodeData.rootNode, zipID: zipId),
+                    itemID: getNodeId(rootNodeInd: nodeData.rootNode.rootNodeInd, zipId: zipId),
                     nextCookie: FSDirectoryCookie(UInt64(currentOffset + 1)),
-                    attributes: attributes,
+                    attributes: req != nil
+                        ? try getAttributesForZipID(
+                            zipId: zipId, rootNode: nodeData.rootNode, req: req!) : nil,
                 )
 
                 if !ok {
