@@ -77,11 +77,12 @@ class WritableZip: PublicZip {
         if !detached.contains(index) {
             try FileManager.default.createDirectory(
                 at: detachedDir, withIntermediateDirectories: true)
+
             let entry = listableZip.getEntry(index: index)
             let length = Int(entry.size)
             let buffer = DataBufferWrapper(capacity: length)
 
-            let read = try readData(index: index, offset: 0, length: length, buffer: buffer)
+            let read = try listableZip.readData(index: index, offset: 0, length: length, buffer: buffer)
             if read != length {
                 throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
             }

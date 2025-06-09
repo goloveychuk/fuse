@@ -259,6 +259,7 @@ typealias Listings = [Indexed<ZipID>]
 // }
 
 protocol MutableBufferLike {
+    var length: Int {get}
     func withUnsafeMutableBytes<R>(_ body: (UnsafeMutableRawBufferPointer) throws -> R) rethrows -> R
 }
 
@@ -368,6 +369,9 @@ class ListableZip : PublicZip {
     }
 
     public func readData(index: UInt, offset: off_t, length: Int, buffer: MutableBufferLike) throws -> Int {
+        if (buffer.length != length) {
+            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue) //todo
+        }
         let zipEntry = getEntry(index: index)
             switch zipEntry.compressionMethod {
             case .deflate:
@@ -406,7 +410,7 @@ class ListableZip : PublicZip {
                         length: length,
                         bufferPointer: rawBuffer,
                     )
-                    if bytesRead > 0 {  //todo
+                    if bytesRead > 0 {  //todo think
                         return bytesRead
                     } else {
                         throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
@@ -469,10 +473,10 @@ class ListableZip : PublicZip {
         }
 
         // Make sure the buffer has enough space
-        let bufferCapacity = min(bytesToRead, bufferPointer.count)
-        if bufferCapacity <= 0 {
-            return 0
-        }
+        // let bufferCapacity = min(bytesToRead, bufferPointer.count)
+        // if bufferCapacity <= 0 {
+        //     return 0
+        // }
 
         // Seek to the correct position (data offset + requested offset)
         try fileHandle.seek(toOffset: UInt64(dataOffset) + UInt64(offset))
@@ -480,7 +484,7 @@ class ListableZip : PublicZip {
         let bytesRead = read(
             fileHandle.fileDescriptor,
             bufferPointer.baseAddress!,
-            bufferCapacity)
+            bytesToRead)
 
         return bytesRead
         // // Read directly into the provided buffer

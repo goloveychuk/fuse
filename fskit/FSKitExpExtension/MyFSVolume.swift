@@ -296,7 +296,8 @@ extension MyFSVolume: FSVolume.Operations {
         _ newAttributes: FSItem.SetAttributesRequest,
         on item: FSItem
     ) async throws -> FSItem.Attributes {
-        throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
+        return newAttributes //todo
+        // throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
     }
 
     func createItem(
