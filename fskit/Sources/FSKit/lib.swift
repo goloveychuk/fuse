@@ -40,7 +40,7 @@ public struct FSDirectoryVerifier: Sendable {  //not used
 
 open class FSMutableFileDataBuffer : NSObject {
     // open var length: Int { get }
-    public func withUnsafeMutableBytes<R, E>(_ body: (UnsafeMutableRawBufferPointer) throws(E) -> R) throws(E) -> R where E : Error {
+    public func withUnsafeMutableBytes<R, E>(_ body: (UnsafeMutableRawBufferPointer)  throws(E) -> R) throws(E) -> R where E : Error {
         //todo
         return try body(UnsafeMutableRawBufferPointer.allocate(byteCount: 0, alignment: 0))
     }

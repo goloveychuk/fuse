@@ -7,17 +7,18 @@ class CachedZip: @unchecked Sendable {
     var refCount: UInt32
     private enum ZipState {
         case notLoaded
-        case loaded(ListableZip)
+        case loaded(WritableZip)
         case error(Error)
     }
     let lastUsedTime = Atomic<TimeInterval>(0)
     private var state: ZipState = .notLoaded
     let zipPath: String
-
-    init(zipPath: String) {
+    let writableConfig: WritableConfig
+    init(writableConfig: WritableConfig, zipPath: String) {
         self.zipPath = zipPath
-        refCount = 1
+        refCount = 1 // todo not used
         pthread_rwlock_init(&rwlock, nil)
+        self.writableConfig = writableConfig
     }
 
     deinit {
@@ -38,7 +39,7 @@ class CachedZip: @unchecked Sendable {
         }
     }
 
-    func get() throws -> ListableZip {
+    func get() throws -> PublicZip {
         lastUsedTime.store(Date().timeIntervalSince1970, ordering: .relaxed)
         pthread_rwlock_rdlock(&rwlock)
 
@@ -65,7 +66,7 @@ class CachedZip: @unchecked Sendable {
                 throw error
             case .notLoaded:
                 do {
-                    let newZip = try ListableZip(fileURL: URL(fileURLWithPath: zipPath))
+                    let newZip = try WritableZip(config: writableConfig, fileURL: URL(fileURLWithPath: zipPath))
                     state = .loaded(newZip)
                     pthread_rwlock_unlock(&rwlock)
                     return newZip

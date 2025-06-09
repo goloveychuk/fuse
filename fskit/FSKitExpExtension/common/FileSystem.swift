@@ -96,11 +96,11 @@ public class FileSystem {
     private var rootNodes = [RootNode]()
     private var zipCache = [PathSegment: CachedZip]()
     private let fileIdEncoder = FileIdEncoder()
-
-    init(manifestPath: String) throws {
+    private var writableConfig: WritableConfig
+    init(manifestPath: String, mutationsPath: String?) throws {
         let data = try Data(contentsOf: URL(filePath: manifestPath))
         let depTree = try DependencyNode.fromJSONData(data)
-
+        writableConfig = WritableConfig(mutationsPath: mutationsPath)
         _ = visit(dependencyNode: depTree, parentInd: 0)
         startCleaningWorker()
     }
@@ -141,7 +141,7 @@ public class FileSystem {
                 zipInfo = (cachedZip, subpath: info.subpath)
                 cachedZip.refCount += 1
             } else {
-                let cachedZip: CachedZip = CachedZip(zipPath: info.zipPath)
+                let cachedZip: CachedZip = CachedZip(writableConfig: writableConfig, zipPath: info.zipPath)
                 zipCache[info.zipPath] = cachedZip
                 zipInfo = (cachedZip, subpath: info.subpath)
             }
@@ -300,15 +300,15 @@ public class FileSystem {
             attr.linkCount = 1
             attr.mode = UInt32(S_IFDIR | 0o755)  //todo get original
         case .symlink(let entryInd):
-            let zipEntry = listableZip.getEntry(index: entryInd)
+            let zipEntry = try listableZip.stat(index: entryInd)
             attr.size = 1
             attr.allocSize = 1
             attr.mode = UInt32(S_IFLNK | zipEntry.permissions)
         case .file(let entryInd):
-            let zipEntry = listableZip.getEntry(index: entryInd)
+            let zipEntry = try listableZip.stat(index: entryInd)
             attr.linkCount = cachedZip.refCount
             attr.size = UInt64(zipEntry.size)
-            attr.allocSize = UInt64(zipEntry.compressedSize)  //todo not sure
+            attr.allocSize = UInt64(zipEntry.allocSize)  //todo not sure
             attr.mode = UInt32(S_IFREG | zipEntry.permissions)
         }
         return attr
@@ -487,15 +487,14 @@ public class FileSystem {
     }
 
     public func readSymbolicLink(_ fileID: FSItem.Identifier) async throws -> FSFileName {
-
         let nodeData = getNodeByFileId(fileID)
         if let zipId = nodeData.zipId {
             guard case .zip(let zipInfo, _) = nodeData.rootNode.node else {
                 throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
             }
             if case .symlink(let entryInd) = zipId {
-                let data = try readFileToBuffer(
-                    entryInd: entryInd, cachedZip: zipInfo.cachedZip)
+                let listableZip = try zipInfo.cachedZip.get()
+                let data = try listableZip.readLink(index: entryInd)
                 return FSFileName(data: data)
             }
         } else {
@@ -506,25 +505,28 @@ public class FileSystem {
         throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
     }
 
-    private func readFileToBuffer(entryInd: UInt, cachedZip: CachedZip) throws -> Data {
-
-        let listableZip = try cachedZip.get()
-        let zipEntry = listableZip.getEntry(index: entryInd)
-        var data = Data(capacity: Int(zipEntry.compressedSize))
-        let read = try data.withUnsafeMutableBytes { (body: UnsafeMutableRawBufferPointer) in
-            return try listableZip.readData(
-                index: entryInd, offset: 0, length: Int(zipEntry.compressedSize),
-                bufferPointer: body)
+    func writeData(_ fileId: FSItem.Identifier, data: Data, offset: off_t) async throws -> Int {
+        let nodeData = getNodeByFileId(fileId)
+        guard let zipId = nodeData.zipId else {
+            throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
         }
-        if read != zipEntry.compressedSize {
-            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        guard case .zip(let zipInfo, _) = nodeData.rootNode.node else {
+            throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
         }
-        return data
+        switch zipId {
+        case .symlink(_):
+            throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
+        case .file(let entryInd):
+            let listableZip = try zipInfo.cachedZip.get()
+            return try listableZip.writeData(index: entryInd, data: data, offset: offset)
+        case .dir(_):
+            throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
+        }
     }
 
     func readData(
         _ fileID: FSItem.Identifier, offset: off_t, length: Int,
-        into buffer: FSMutableFileDataBuffer
+        into buffer: MutableBufferLike
     ) async throws -> Int {
         let nodeData = getNodeByFileId(fileID)
 
@@ -540,51 +542,8 @@ public class FileSystem {
 
         case .file(let entryInd):
             let listableZip = try zipInfo.cachedZip.get()
-            let zipEntry = listableZip.getEntry(index: entryInd)
-            switch zipEntry.compressionMethod {
-            case .deflate:
-                let compressedData = try readFileToBuffer(
-                    entryInd: entryInd, cachedZip: zipInfo.cachedZip)
-
-                // Create a temporary buffer for decompressed data
-                let destinationSize = Int(zipEntry.size)
-
-                // If offset is beyond the file size, return 0 bytes read
-                if offset >= destinationSize {
-                    return 0
-                }
-
-                let decompressedData = try decompressDeflate(
-                    compressedData: compressedData, destinationSize: destinationSize)
-                // Calculate how many bytes to copy accounting for offset and available data
-                let availableBytes = destinationSize - Int(offset)
-                let bytesToCopy = min(availableBytes, length)
-
-                // Copy the decompressed data to the output buffer, respecting offset
-                return buffer.withUnsafeMutableBytes { outputBuffer in
-                    decompressedData.withUnsafeBytes { sourceBuffer in
-                        let source = sourceBuffer.baseAddress!.advanced(by: Int(offset))
-                        memcpy(outputBuffer.baseAddress!, source, bytesToCopy)
-                        return bytesToCopy
-                    }
-                }
-
-            case .store:
-                return try buffer.withUnsafeMutableBytes { rawBuffer in
-                    // let buffer = rawBuffer.bindMemory(to: UInt8.self)
-                    let bytesRead = try listableZip.readData(
-                        index: entryInd,
-                        offset: Int(offset),
-                        length: length,
-                        bufferPointer: rawBuffer,
-                    )
-                    if bytesRead > 0 {  //todo
-                        return bytesRead
-                    } else {
-                        throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
-                    }
-                }
-            }
+            return try listableZip.readData(index: entryInd, offset: offset, length: length, buffer: buffer)
+            
         case .dir(_):
             throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
         }

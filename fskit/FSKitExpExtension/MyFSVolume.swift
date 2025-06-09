@@ -186,29 +186,33 @@ extension MyFSVolume: FSVolume.Operations {
         self.p = [
             options.url(forOption: "m"),
             options.url(forOption: "d"),
+            options.url(forOption: "u"),
         ]
 
         // self.mount3 = options
-        var path: String? = nil
+        var manifestPath: String? = nil
+        var mutationsPath: String? = nil
         // path = "/Users/vadymh/github/fskit/FSKitSample/example/.yarn/fuse-state.json"
         var optionsIter = options.taskOptions.makeIterator()
         while let option = optionsIter.next() {
             switch option {
             case "-m":
-                path = optionsIter.next()
+                manifestPath = optionsIter.next()
+            case "-u":
+                mutationsPath = optionsIter.next()
             default:
                 throw MyError.badMountParams
             }
         }
 
-        guard let path = path else {
+        guard let manifestPath = manifestPath else {
             throw MyError.badMountParams
         }
 
         logger.debug("activate")
 
         do {
-            self.fs = try FileSystem(manifestPath: path)
+            self.fs = try FileSystem(manifestPath: manifestPath, mutationsPath: mutationsPath)
             return MyFSItem(fileId: self.fs.getRootIdentifier())
 
         } catch {
@@ -400,10 +404,10 @@ extension MyFSVolume: FSVolume.ReadWriteOperations {
     }
 
     func write(contents: Data, to item: FSItem, at offset: off_t) async throws -> Int {
-        throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
-        // guard let item = item as? MyFSItem else {
-        //     throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
-        // }
-        // return try item.writeData(contents: contents, offset: offset)
+        guard let item = item as? MyFSItem else {
+            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        }
+
+        return try await fs.writeData(item.fileId, data: contents, offset: offset)
     }
 }

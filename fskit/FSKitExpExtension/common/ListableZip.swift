@@ -258,20 +258,48 @@ typealias Listings = [Indexed<ZipID>]
 //     }
 // }
 
+protocol MutableBufferLike {
+    func withUnsafeMutableBytes<R>(_ body: (UnsafeMutableRawBufferPointer) throws -> R) rethrows -> R
+}
+
+class DataBufferWrapper: MutableBufferLike {
+    var data: Data
+    var length: Int
+    init(capacity: Int) {
+        self.data = Data(capacity: capacity)
+        self.length = capacity
+    }
+    func withUnsafeMutableBytes<R>(_ body: (UnsafeMutableRawBufferPointer) throws -> R) rethrows -> R {
+        return try body(data.withUnsafeMutableBytes { $0 })
+    }
+}
+
+extension FSMutableFileDataBuffer: MutableBufferLike {
+}
+
 struct MinEntry {
     let localHeaderOffset: UInt32
     let compressedSize: UInt32
     let size: UInt32
     let permissions: Permissions
-    // let isSymbolicLink: Bool
     let compressionMethod: CompressionMethod
-    // let symlinkName: FSFileName?  //only for symlink
 }
 
+struct ZipStat {
+    let size: UInt32
+    let allocSize: UInt32
+    let permissions: Permissions
+}
+
+protocol PublicZip {
+    func stat(index: UInt) throws -> ZipStat
+    func readLink(index: UInt) throws -> Data
+    func readData(index: UInt, offset: off_t, length: Int, buffer: MutableBufferLike) throws -> Int
+    func writeData(index: UInt, data: Data, offset: off_t) throws -> Int
+} 
 
 
-
-class ListableZip {
+class ListableZip : PublicZip {
 
     private static let SAFE_TIME: Date = Date(timeIntervalSince1970: 456_789_000)
     // static let S_IFMT: UInt32 = 0xF000  // File type mask
@@ -311,13 +339,92 @@ class ListableZip {
         return listings[Int(index)]
     }
 
-    func getEntry(index: UInt) -> MinEntry {
+    public func getEntry(index: UInt) -> MinEntry {
         return allEntries[Int(index)]
     }
 
-    func readData(
+    public func readLink(index: UInt) throws -> Data {
+        let zipEntry = getEntry(index: index)
+        if zipEntry.compressionMethod != .store {
+            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        }
+        return try rawReadAllDataIntoBuffer(index: index)
+    }
+
+    func writeData(index: UInt, data: Data, offset: off_t) throws -> Int {
+        throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
+    }
+
+    func stat(index: UInt) -> ZipStat {
+        let entry = getEntry(index: index)
+        return ZipStat(size: entry.size, allocSize: entry.compressedSize, permissions: entry.permissions)
+    }
+
+    public func readData(index: UInt, offset: off_t, length: Int, buffer: MutableBufferLike) throws -> Int {
+        let zipEntry = getEntry(index: index)
+            switch zipEntry.compressionMethod {
+            case .deflate:
+                let compressedData = try rawReadAllDataIntoBuffer(
+                    index: index)
+
+                // Create a temporary buffer for decompressed data
+                let destinationSize = Int(zipEntry.size)
+
+                // If offset is beyond the file size, return 0 bytes read
+                if offset >= destinationSize {
+                    return 0
+                }
+
+                let decompressedData = try decompressDeflate(
+                    compressedData: compressedData, destinationSize: destinationSize)
+                // Calculate how many bytes to copy accounting for offset and available data
+                let availableBytes = destinationSize - Int(offset)
+                let bytesToCopy = min(availableBytes, length)
+
+                // Copy the decompressed data to the output buffer, respecting offset
+                return buffer.withUnsafeMutableBytes { outputBuffer in
+                    decompressedData.withUnsafeBytes { sourceBuffer in
+                        let source = sourceBuffer.baseAddress!.advanced(by: Int(offset))
+                        memcpy(outputBuffer.baseAddress!, source, bytesToCopy)
+                        return bytesToCopy
+                    }
+                }
+
+            case .store:
+                return try buffer.withUnsafeMutableBytes { rawBuffer in
+                    // let buffer = rawBuffer.bindMemory(to: UInt8.self)
+                    let bytesRead = try rawReadData(
+                        index: index,
+                        offset: Int(offset),
+                        length: length,
+                        bufferPointer: rawBuffer,
+                    )
+                    if bytesRead > 0 {  //todo
+                        return bytesRead
+                    } else {
+                        throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+                    }
+                }
+            }
+    }
+
+    private func rawReadAllDataIntoBuffer(index: UInt)  throws -> Data {
+        let zipEntry = getEntry(index: index)
+        var data = Data(capacity: Int(zipEntry.compressedSize))
+        let read = try  data.withUnsafeMutableBytes { (body:UnsafeMutableRawBufferPointer)  throws -> Int in
+            return try rawReadData(
+                index: index, offset: 0, length: Int(zipEntry.compressedSize),
+                bufferPointer: body)
+        }
+        if read != zipEntry.compressedSize {
+            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        }
+        return data
+    }
+
+    private func rawReadData(
         index: UInt, offset: Int, length: Int, bufferPointer: UnsafeMutableRawBufferPointer
-    ) throws -> Int {
+    )  throws -> Int {
         let entry = getEntry(index: index)
 
         // Open the file where the zip is stored
@@ -455,7 +562,7 @@ class ListableZip {
             try? fileHandle.close()
         }
         // Get file size using stat on the file descriptor
-        var statInfo = stat()
+        var statInfo = Darwin.stat()
         if fstat(fileHandle.fileDescriptor, &statInfo) != 0 {
             throw ZipError.invalidZipFile("Could not determine file size")
         }
