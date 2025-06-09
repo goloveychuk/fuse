@@ -110,9 +110,9 @@ public class FileSystem {
     }
 
     private func visitChildren(children: Children, parentInd: UInt) -> [PathSegment: RootNode] {
-        return children.mapValues { child in
-            visit(dependencyNode: child, parentInd: parentInd)
-        }
+        return Dictionary(uniqueKeysWithValues: children.sorted(by: { $0.key < $1.key }).map { child in
+            (child.key, visit(dependencyNode: child.value, parentInd: parentInd))
+        })
     }
 
     private func startCleaningWorker() {

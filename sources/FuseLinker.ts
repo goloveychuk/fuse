@@ -461,7 +461,6 @@ class FuseInstaller implements Installer {
         this.opts.project.cwd,
         `.yarn/fuse-state.json`,
       );
-      //todo sort fuse data
       await xfs.changeFilePromise(fuseStatePath, JSON.stringify(fuseData), {});
       promises.push(mountFuse(mountRoot, fuseStatePath));
     }
