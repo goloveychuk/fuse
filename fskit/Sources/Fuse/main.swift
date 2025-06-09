@@ -329,7 +329,6 @@ func main() throws {
         // }
         let req = SendableAnything(req)
         // DispatchQueue.global().async {
-    
 
         let fs = context.fileSystem!
 
@@ -342,15 +341,13 @@ func main() throws {
                 // sleep(10)
                 // try await Task.sleep(for: .seconds(1))
                 let _ = try await fs.enumerateDirectory(
-                    directory: FSItem.Identifier(rawValue: ino)!, startingAt: FSDirectoryCookie(UInt64(off)),
+                    directory: FSItem.Identifier(rawValue: ino)!,
+                    startingAt: FSDirectoryCookie(UInt64(off)),
                     verifier: FSDirectoryVerifier(0),
                     attributes: attrReq,
                     packer: packer
                 )
                 let buf = packer.getBuf()
-
-               
-
 
                 print("readdirplus: replied with \(buf.used) bytes")
                 fuse_reply_buf(req.value, buf.buf, buf.used)
@@ -369,11 +366,31 @@ func main() throws {
     // operations.read = ll_read
 
     // Mount point
-    let mountPoint = CommandLine.arguments[3]
+    var mountPoint: String? = nil
+    var manifestPath: String? = nil
+    var mutationsPath: String? = nil
+    // path = "/Users/vadymh/github/fskit/FSKitSample/example/.yarn/fuse-state.json"
+    var optionsIter = CommandLine.arguments[1...].makeIterator()
+    while let option = optionsIter.next() {
+        switch option {
+        case "-m":
+            manifestPath = optionsIter.next()
+        case "-u":
+            mutationsPath = optionsIter.next()
+        default:
+            mountPoint = option
+        }
+    }
+    guard let mountPoint = mountPoint else {
+        throw MyError.badMountParams
+    }
+    guard let manifestPath = manifestPath else {
+        throw MyError.badMountParams
+    }
 
-    let fs = try FileSystem(manifestPath: CommandLine.arguments[2], mutationsPath: CommandLine.arguments[3])
+    let fs = try FileSystem(
+        manifestPath: manifestPath, mutationsPath: mutationsPath)
     context.fileSystem = fs
-    
 
     // Create mount point if needed
     let fileManager = FileManager.default
