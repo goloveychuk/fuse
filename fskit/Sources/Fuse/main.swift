@@ -223,11 +223,11 @@ extension FSItem.Attributes {
     func toStat() -> stat {
         var st = stat()
         memset(&st, 0, MemoryLayout<stat>.size)
+        //todo all stats
         st.st_ino = ino_t(self.fileID.rawValue)
         st.st_mode = self.mode
         st.st_nlink = self.linkCount
         st.st_size = Int(self.size)
-        // todo other attributes
         return st
     }
 }
