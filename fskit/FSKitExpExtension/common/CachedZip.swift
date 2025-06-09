@@ -18,7 +18,7 @@ final class Cached<T>: @unchecked Sendable {
     private let getZip: () throws -> T
 
     init(_ getZip: @escaping () throws -> T) {
-        refCount = 1 // todo not used
+        refCount = 1
         pthread_rwlock_init(&rwlock, nil)
         self.getZip = getZip
     }

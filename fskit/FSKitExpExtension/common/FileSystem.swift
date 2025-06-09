@@ -11,18 +11,17 @@ private let gid = getgid()
 
 private enum RootNodeData {
     case softLink(data: String)
-    case zip(zipInfo: ZipInfo, children: [PathSegment: RootNode])
-    case dirPortal(target: String, children: [PathSegment: RootNode])
-    case nestedDir(children: [PathSegment: RootNode])
+    case zip(zipInfo: ZipInfo, children: OrderedDictionary<PathSegment, RootNode>)
+    case dirPortal(target: String, children: OrderedDictionary<PathSegment, RootNode>)
+    case nestedDir(children: OrderedDictionary<PathSegment, RootNode>)
 }
 
 
-private struct RootNode {
+private struct RootNode: Sendable {
     // let fileId: FSItem.Identifier
     let rootNodeInd: UInt
     let parentInd: UInt
     let node: RootNodeData
-
 }
 
 final class FileIdEncoder: Sendable {
@@ -85,6 +84,7 @@ final class FileIdEncoder: Sendable {
 
 }
 
+
 class Visitor {
     fileprivate var rootNodes = [RootNode]()
     fileprivate var zipCache = [PathSegment: CachedZip]()    
@@ -94,9 +94,9 @@ class Visitor {
         _ = visit(dependencyNode: depTree, parentInd: 0)
 
     }
-    private func visitChildren(children: Children, parentInd: UInt) -> [PathSegment: RootNode] {
-        return Dictionary(uniqueKeysWithValues: children.sorted(by: { $0.key < $1.key }).map { child in
-            (child.key, visit(dependencyNode: child.value, parentInd: parentInd))
+    private func visitChildren(children: Children, parentInd: UInt) -> OrderedDictionary<PathSegment, RootNode> {
+        return OrderedDictionary(children.mapValues { child in
+            visit(dependencyNode: child, parentInd: parentInd)
         })
     }
     private func visit(
@@ -105,7 +105,7 @@ class Visitor {
         let rootNodeInd = UInt(rootNodes.count)
         //this is a hack, because idk how to make holes in array, will be replaced later.
         rootNodes.append(
-            RootNode(rootNodeInd: UInt.max, parentInd: UInt.max, node: .nestedDir(children: [:])))
+            RootNode(rootNodeInd: UInt.max, parentInd: UInt.max, node: .nestedDir(children: OrderedDictionary([:]))))
         let nodeData: RootNodeData
 
         switch dependencyNode {
@@ -286,6 +286,7 @@ public final class FileSystem: Sendable {
         case .zip(_, _), .dirPortal(_, _), .nestedDir(_):
             attr.size = 0
             attr.allocSize = 0
+            attr.linkCount = 1
             attr.mode = UInt32(S_IFDIR | 0o755)  //by default node_modules created with 755
             return attr
         }
@@ -320,6 +321,7 @@ public final class FileSystem: Sendable {
             let zipEntry = try listableZip.statEntry(index: entryInd)
             attr.size = 1
             attr.allocSize = 1
+            attr.linkCount = 1
             attr.mode = UInt32(S_IFLNK | zipEntry.permissions)
         case .file(let entryInd):
             let zipEntry = try listableZip.statEntry(index: entryInd)
@@ -374,7 +376,7 @@ public final class FileSystem: Sendable {
     }
 
     private func getChildrenData(nodeData: Inode) throws -> (
-        children: [PathSegment: RootNode]?, childrenForZipId: (ZipInfo, ZipID)?
+        children: OrderedDictionary<PathSegment, RootNode>?, childrenForZipId: (ZipInfo, ZipID)?
     ) {
         switch nodeData.rootNode.node {
         case .softLink(_):
@@ -443,7 +445,7 @@ public final class FileSystem: Sendable {
         let childrenData = try getChildrenData(nodeData: nodeData)
 
         if let children = childrenData.children {
-            for (name, child) in children {
+            for (name, child) in children.entries() {
                 defer {
                     currentOffset += 1
                 }
