@@ -327,7 +327,15 @@ func main() throws {
     // Initialize operations structure
     var operations = fuse_lowlevel_ops()
     // operations.init = ll_init
-    // operations.destroy = ll_destroy
+    // operations.destroy = 
+    // operations.setattr = 
+    // operations.read =  
+    // operations.write =  
+    // operations.open =  ?
+    // operations.flush =  ?
+    // operations.release =  ?
+    // operations.access =  todo check by default by os
+
     operations.lookup = { (req, parent, name) in
         let req = SendableAnything(req)
         let fs = context.fileSystem!
