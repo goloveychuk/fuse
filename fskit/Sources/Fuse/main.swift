@@ -226,7 +226,7 @@ extension FSItem.Attributes {
         st.st_ino = ino_t(self.fileID.rawValue)
         st.st_mode = self.mode
         st.st_nlink = self.linkCount
-        st.st_size = Int(self.size) 
+        st.st_size = Int(self.size)
         // todo other attributes
         return st
     }
@@ -241,13 +241,14 @@ class PlusPacker: FSDirectoryEntryPacker {
     init(req: fuse_req_t?, bufSize: Int) {
         allBufSize = bufSize
         self.req = req
-        allBuf = UnsafeMutablePointer<Int8>.allocate(capacity: Int(bufSize))
+        allBuf = UnsafeMutablePointer<Int8>.allocate(capacity: Int(bufSize)) //todo change to data
     }
 
     func packEntry(
         name filename: FSFileName, itemType: FSItem.ItemType, itemID: FSItem.Identifier,
         nextCookie: FSDirectoryCookie, attributes: FSItem.Attributes?
     ) -> Bool {
+        // todo https://github.com/libfuse/libfuse/blob/b773020464641d3e9cec5ad5fa35e7153e54e118/lib/fuse.c#L3698
         // print ("packEntry: \(filename.string ?? "")")
         let remaining = allBufSize - bufused
         // check remaining?
@@ -255,24 +256,29 @@ class PlusPacker: FSDirectoryEntryPacker {
             // todo warn
             return true
         }
-
-        var entryParam = fuse_entry_param()
-        memset(&entryParam, 0, MemoryLayout<fuse_entry_param>.size)
-
-        entryParam.ino = fuse_ino_t(itemID.rawValue)
-        entryParam.attr_timeout = TIMEOUT
-        entryParam.entry_timeout = TIMEOUT
-
+        let attr: FSItem.Attributes
         if name == "." || name == ".." {
-            entryParam.attr.st_ino = ino_t(itemID.rawValue)            
-            entryParam.attr.st_mode = UInt32(Glibc.S_IFDIR | 0o755) //todo
+            //todo should I send all attrs?
+            attr = FSItem.Attributes()
+            attr.fileID = itemID 
+            attr.mode = UInt32(Glibc.S_IFDIR | 0o755)
+            attr.linkCount = 2
+            attr.size = 0
         } else {
-            entryParam.attr = attributes!.toStat()
+            attr = attributes!
         }
+
+        var entry = fuse_entry_param(
+            ino: itemID.toFuseIno(),
+            generation: 0,
+            attr: attr.toStat(),
+            attr_timeout: TIMEOUT,
+            entry_timeout: TIMEOUT
+        )
 
         let entrySize = name.withCString { cName in
             fuse_add_direntry_plus(
-                req, allBuf.advanced(by: bufused), remaining, cName, &entryParam,
+                req, allBuf.advanced(by: bufused), remaining, cName, &entry,
                 Int(nextCookie.rawValue))
         }
         if entrySize > remaining {
@@ -296,6 +302,11 @@ extension fuse_ino_t {
         return FSItem.Identifier(rawValue: UInt64(self))!
     }
 }
+extension FSItem.Identifier {
+    func toFuseIno() -> fuse_ino_t {
+        return fuse_ino_t(self.rawValue)
+    }
+}
 
 class SendableAnything<T>: @unchecked Sendable {
     let value: T
@@ -305,7 +316,6 @@ class SendableAnything<T>: @unchecked Sendable {
 }
 
 let lookupGetAttr = FSItem.GetAttributesRequest([.fileID, .mode, .linkCount, .size])  //todo
-
 
 @MainActor
 func main() throws {
@@ -322,22 +332,25 @@ func main() throws {
         let req = SendableAnything(req)
         let fs = context.fileSystem!
 
-        let name =  String(cString: name!)
+        let name = String(cString: name!)
 
         Task.detached {
 
             print("lookup: parent=\(parent), name=\(name)")
 
             do {
-                let item = try await fs.lookupItem(FSFileName(string: name), inDirectory: parent.toId())
-                var entry = fuse_entry_param()
-                memset(&entry, 0, MemoryLayout<fuse_entry_param>.size)
-                entry.ino = fuse_ino_t(item.0.rawValue)
-                entry.attr_timeout = TIMEOUT
-                entry.entry_timeout = TIMEOUT
+                let item = try await fs.lookupItem(
+                    FSFileName(string: name), inDirectory: parent.toId())
+
                 let stat = try await fs.getAttributes(lookupGetAttr, of: item.0)
 
-                entry.attr = stat.toStat()
+                var entry = fuse_entry_param(
+                    ino: item.0.toFuseIno(),
+                    generation: 0,
+                    attr: stat.toStat(),
+                    attr_timeout: TIMEOUT,
+                    entry_timeout: TIMEOUT
+                )
 
                 fuse_reply_entry(req.value, &entry)
             } catch {
@@ -371,7 +384,11 @@ func main() throws {
             print("getattr: ino=\(ino)")
 
             // Define a dummy stat structure
-            let stat = try await fs.getAttributes(FSItem.GetAttributesRequest([.uid, .modifyTime, .fileID, .type, .mode, .flags, .accessTime, .gid, .size, .birthTime]), of: ino.toId())
+            let stat = try await fs.getAttributes(
+                FSItem.GetAttributesRequest([
+                    .uid, .modifyTime, .fileID, .type, .mode, .flags, .accessTime, .gid, .size,
+                    .birthTime,
+                ]), of: ino.toId())
             var st = stat.toStat()
             fuse_reply_attr(req.value, &st, 1.0)
         }
