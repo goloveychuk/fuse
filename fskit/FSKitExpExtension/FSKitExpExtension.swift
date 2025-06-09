@@ -8,6 +8,16 @@
 import FSKit
 import Foundation
 
+extension FSItem.GetAttributesRequest {
+    convenience init(_ wantedAttributes: FSItem.Attribute) {
+        self.init()
+        self.wantedAttributes = wantedAttributes
+    }
+}
+
+extension FSMutableFileDataBuffer: MutableBufferLike {
+}
+
 enum Constants {
 
     static let containerIdentifier: UUID = UUID(uuidString: "8E055EB2-12FD-4EB8-A315-C082CBCFBDD3")!
