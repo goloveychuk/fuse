@@ -275,8 +275,7 @@ class DataBufferWrapper: MutableBufferLike {
     }
 }
 
-extension FSMutableFileDataBuffer: MutableBufferLike {
-}
+
 
 struct MinEntry {
     let localHeaderOffset: UInt32
@@ -295,7 +294,7 @@ struct ZipStat {
 
 
 protocol PublicZip {
-    func stat(index: UInt) throws -> ZipStat
+    func statEntry(index: UInt) throws -> ZipStat
     func readLink(index: UInt) throws -> Data
     func readData(index: UInt, offset: off_t, length: Int, buffer: MutableBufferLike) throws -> Int
     func writeData(index: UInt, data: Data, offset: off_t) throws -> Int
@@ -363,7 +362,7 @@ class ListableZip : PublicZip {
         throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
     }
 
-    func stat(index: UInt) -> ZipStat {
+    func statEntry(index: UInt) -> ZipStat {
         let entry = getEntry(index: index)
         return ZipStat(size: entry.size, allocSize: entry.compressedSize, permissions: entry.permissions)
     }
@@ -573,7 +572,7 @@ class ListableZip : PublicZip {
             try? fileHandle.close()
         }
         // Get file size using stat on the file descriptor
-        var statInfo = Darwin.stat()
+        var statInfo = stat()
         if fstat(fileHandle.fileDescriptor, &statInfo) != 0 {
             throw ZipError.invalidZipFile("Could not determine file size")
         }

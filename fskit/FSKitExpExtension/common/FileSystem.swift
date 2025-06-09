@@ -16,12 +16,6 @@ private enum RootNodeData {
     case nestedDir(children: [PathSegment: RootNode])
 }
 
-extension FSItem.GetAttributesRequest {
-    convenience init(_ wantedAttributes: FSItem.Attribute) {
-        self.init()
-        self.wantedAttributes = wantedAttributes
-    }
-}
 
 private struct RootNode {
     // let fileId: FSItem.Identifier
@@ -91,41 +85,20 @@ class FileIdEncoder {
 
 }
 
-public class FileSystem {
-
-    private var rootNodes = [RootNode]()
-    private var zipCache = [PathSegment: CachedZip]()
-    private let fileIdEncoder = FileIdEncoder()
+class Visitor {
+    fileprivate var rootNodes = [RootNode]()
+    fileprivate var zipCache = [PathSegment: CachedZip]()    
     private let writableConfig: WritableConfig?
-    init(manifestPath: String, mutationsPath: String?) throws {
-        let data = try Data(contentsOf: URL(filePath: manifestPath))
-        let depTree = try DependencyNode.fromJSONData(data)
-        writableConfig = if let mutationsPath = mutationsPath {
-            WritableConfig(mutationsPath: mutationsPath)
-        } else {
-            nil
-        }
+    init(depTree: DependencyNode, writableConfig: WritableConfig?) {
+        self.writableConfig = writableConfig
         _ = visit(dependencyNode: depTree, parentInd: 0)
-        startCleaningWorker()
-    }
 
+    }
     private func visitChildren(children: Children, parentInd: UInt) -> [PathSegment: RootNode] {
         return Dictionary(uniqueKeysWithValues: children.sorted(by: { $0.key < $1.key }).map { child in
             (child.key, visit(dependencyNode: child.value, parentInd: parentInd))
         })
     }
-
-    private func startCleaningWorker() {
-        Task {
-            while true {
-                try await Task.sleep(for: .seconds(20))
-                for (_, cachedZip) in zipCache {
-                    cachedZip.cleanIfNeeded()
-                }
-            }
-        }
-    }
-
     private func visit(
         dependencyNode: DependencyNode, parentInd: UInt
     ) -> RootNode {
@@ -171,7 +144,41 @@ public class FileSystem {
         rootNodes[Int(rootNodeInd)] = rootNode
         return rootNode
     }
+}
 
+public class FileSystem {
+
+    private let rootNodes: [RootNode]
+    private let zipCache: [PathSegment: CachedZip]
+    private let fileIdEncoder = FileIdEncoder()
+
+    init(manifestPath: String, mutationsPath: String?) throws {
+        let data = try Data(contentsOf: URL(filePath: manifestPath))
+        let depTree = try DependencyNode.fromJSONData(data)
+        let writableConfig: WritableConfig? = if let mutationsPath = mutationsPath {
+            WritableConfig(mutationsPath: mutationsPath)
+        } else {
+            nil
+        }
+        let visitor = Visitor(depTree: depTree, writableConfig: writableConfig)
+        self.rootNodes = visitor.rootNodes
+        self.zipCache = visitor.zipCache
+        startCleaningWorker()
+    }
+
+
+    private func startCleaningWorker() {
+        Task.detached { [zipCache] in
+            while true {
+                try await Task.sleep(for: .seconds(20))
+                for (_, cachedZip) in zipCache {
+                    cachedZip.cleanIfNeeded()
+                }
+            }
+        }
+    }
+
+    
     private func getNodeByFileId(_ fileid: FSItem.Identifier) -> Inode {
         let (rootNodeInd, type, zipInd) = fileIdEncoder.decodeTuple(
             encoded: fileid.rawValue - FSItem.Identifier.rootDirectory.rawValue)
@@ -310,12 +317,12 @@ public class FileSystem {
             attr.linkCount = 1
             attr.mode = UInt32(S_IFDIR | 0o755)  //todo get original
         case .symlink(let entryInd):
-            let zipEntry = try listableZip.stat(index: entryInd)
+            let zipEntry = try listableZip.statEntry(index: entryInd)
             attr.size = 1
             attr.allocSize = 1
             attr.mode = UInt32(S_IFLNK | zipEntry.permissions)
         case .file(let entryInd):
-            let zipEntry = try listableZip.stat(index: entryInd)
+            let zipEntry = try listableZip.statEntry(index: entryInd)
             attr.linkCount = cachedZip.refCount
             attr.size = UInt64(zipEntry.size)
             attr.allocSize = UInt64(zipEntry.allocSize)  //todo not sure

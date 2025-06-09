@@ -1,6 +1,6 @@
 import FSKit
 import Foundation
-import Darwin
+
 
 func absolutePathToDirname(_ url: URL) -> String {
     return url.path.replacingOccurrences(of: "/", with: "_")
@@ -38,14 +38,14 @@ class WritableZip: PublicZip {
         return detachedDir.appendingPathComponent("\(index)")
     }
 
-    func stat(index: UInt) throws -> ZipStat {
+    func statEntry(index: UInt) throws -> ZipStat {
         if detached.contains(index) {
-            let stat = listableZip.stat(index: index)
+            let stat = listableZip.statEntry(index: index)
             let realStat = try FileManager.default.attributesOfItem(atPath: detachedFilePath(index).path)
-            let size = UInt32(realStat[.size] as! uint64)
+            let size = UInt32(realStat[.size] as! UInt64)
             return ZipStat(size: size, allocSize: size, permissions: stat.permissions)
         } else {
-            return listableZip.stat(index: index)
+            return listableZip.statEntry(index: index)
         }
     }
     func readLink(index: UInt) throws -> Data {
@@ -60,7 +60,7 @@ class WritableZip: PublicZip {
             try fileHandle.seek(toOffset: UInt64(offset))
             return buffer.withUnsafeMutableBytes { rawBuffer in
                 let fd = fileHandle.fileDescriptor
-                let bytesRead = Darwin.read(fd, rawBuffer.baseAddress, min(length, rawBuffer.count))
+                let bytesRead = read(fd, rawBuffer.baseAddress, min(length, rawBuffer.count))
                 return bytesRead > 0 ? Int(bytesRead) : 0
             }
         } else {
