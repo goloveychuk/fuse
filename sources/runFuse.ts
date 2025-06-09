@@ -22,12 +22,7 @@ async function checkChecksum(p: string, checksum: string) {
 }
 const MAGIC_PATH = '.00unmount';
 
-export async function unmountFuse(nmPath: PortablePath) {
-  const p = ppath.join(nmPath, MAGIC_PATH);
-  if (await xfs.existsPromise(p)) {
-    await xfs.removePromise(p, {});
-  }
-}
+
 
 async function waitToMount(nmPath: PortablePath) {
   const p = ppath.join(nmPath, MAGIC_PATH);
@@ -70,25 +65,40 @@ async function downloadFileOrCache(url: string): Promise<string> {
   throw new Error('Not implemented');
 }
 
-export async function mountFuse(mountRoot: PortablePath, confPath: string) {
-  if (await xfs.existsPromise(mountRoot)) {
-    // df -h /tmp/Volume
-    spawn('umount', [mountRoot], {
-      // detached: true,
-      stdio: 'inherit',
-    });
-  } else {
-    await xfs.mkdirpPromise(mountRoot);
-  }
-  const result = spawnSync('mount', ['-F', '-t', 'MyFS', '-o', `-m=${confPath}`, '/dev/disk5', mountRoot], {
+async function unmountFuse(mountRoot: PortablePath) {
+  // df -h /tmp/Volume
+  spawn('umount', [mountRoot], {
+    //todo run in background
     // detached: true,
     stdio: 'inherit',
   });
+  // if (result.status !== 0) { //todo
+  //   const lsof = spawnSync('lsof', ['+D', mountRoot]).stdout.toString();
+  //   throw new Error(
+  //     `Failed to unmount fuse: ${lsof}, used by processes:\n${lsof}`,
+  //   );
+  // }
+}
+
+export async function mountFuse(mountRoot: PortablePath, confPath: string) {
+  if (await xfs.existsPromise(mountRoot)) {
+    await unmountFuse(mountRoot); //todo run sooner
+  } else {
+    await xfs.mkdirpPromise(mountRoot);
+  }
+  const result = spawnSync(
+    'mount',
+    ['-F', '-t', 'MyFS', '-o', `-m=${confPath}`, '/dev/disk5', mountRoot],
+    {
+      // detached: true,
+      stdio: 'inherit',
+    },
+  );
   console.log(result);
   // if (result.status !== 0) { //does not work on macos
   //   throw new Error(`Failed to mount fuse: ${result.stderr}`);
   // }
-  return
+  return;
   // const name = getExecFileName() as keyof typeof metadata;
   // const meta = metadata[name];
   // if (!meta) {

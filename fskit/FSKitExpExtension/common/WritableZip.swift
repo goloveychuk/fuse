@@ -1,13 +1,10 @@
-import CryptoKit
 import FSKit
 import Foundation
 import Darwin
 
-func sha256(_ str: String) -> String {
-    let inputData = Data(str.utf8)
-    let hashedData = SHA256.hash(data: inputData)
-    return hashedData.compactMap { String(format: "%02x", $0) }.joined()
-}
+func absolutePathToDirname(_ url: URL) -> String {
+    return url.path.replacingOccurrences(of: "/", with: "_")
+}   
 
 struct WritableConfig {
     let mutationsPath: String
@@ -22,7 +19,7 @@ class WritableZip: PublicZip {
     init(config: WritableConfig, fileURL: URL) throws {
         self.config = config
         self.detachedDir = URL(fileURLWithPath: config.mutationsPath).appendingPathComponent(
-            sha256(fileURL.absoluteString))
+            absolutePathToDirname(fileURL))
 
         if (FileManager.default.fileExists(atPath: detachedDir.path)) {
             let files = try FileManager.default.contentsOfDirectory(at: detachedDir, includingPropertiesForKeys: nil)
