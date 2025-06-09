@@ -9,12 +9,14 @@
 		<key>FSActivateOptionSyntax</key>
 		<dict>
 			<key>shortOptions</key>
-			<string>m:d:</string>
+			<string>m:d:u:</string>
 			<key>pathOptions</key>
 			<dict>
 				<key>m</key>
 				<string>Path</string>
 				<key>d</key>
+				<string>Directory</string>
+				<key>u</key>
 				<string>Directory</string>
 			</dict>
 		</dict>
