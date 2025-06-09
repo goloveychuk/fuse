@@ -264,7 +264,7 @@ extension FSItem {
         // Define the same constants that were previously enum cases
         public static let invalid = Identifier(rawValue: 0)!
         public static let parentOfRoot = Identifier(rawValue: 1)!
-        public static let rootDirectory = Identifier(rawValue: 2)! //todo not sure
+        public static let rootDirectory = Identifier(rawValue: 1)! //todo not sure
     }
 }
 

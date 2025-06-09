@@ -4,6 +4,17 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+        // {
+        //     "type": "swift",
+        //     "request": "launch",
+        //     "name": "Launch Swift Executable",
+        //     "args": [],
+        //     "env": {},
+        //     "program": "${workspaceFolder:FSKitSample}/fskit/.build/debug/Fuse",
+        //     "cwd": "${workspaceFolder:FSKitSample}/fskit",
+        // },
+    
+        
         {
             "type": "node",
             "request": "launch",
@@ -18,41 +29,41 @@
                 "${workspaceFolder}/bundles/**"
             ]
         },
+        // {
+        //     "type": "swift",
+        //     "request": "launch",
+        //     "args": [],
+        //     "cwd": "${workspaceFolder:FSKitSample}/fskit",
+        //     "name": "Debug fuse (fskit)",
+        //     "program": "${workspaceFolder:FSKitSample}/fskit/.build/debug/fuse",
+        //     "preLaunchTask": "swift: Build Debug fuse (fskit)"
+        // },
+        // {
+        //     "type": "swift",
+        //     "request": "launch",
+        //     "args": [],
+        //     "cwd": "${workspaceFolder:FSKitSample}/fskit",
+        //     "name": "Release fuse (fskit)",
+        //     "program": "${workspaceFolder:FSKitSample}/fskit/.build/release/fuse",
+        //     "preLaunchTask": "swift: Build Release fuse (fskit)"
+        // },
         {
             "type": "swift",
             "request": "launch",
-            "args": [],
-            "cwd": "${workspaceFolder:FSKitSample}/fskit",
-            "name": "Debug fuse (fskit)",
-            "program": "${workspaceFolder:FSKitSample}/fskit/.build/debug/fuse",
-            "preLaunchTask": "swift: Build Debug fuse (fskit)"
-        },
-        {
-            "type": "swift",
-            "request": "launch",
-            "args": [],
-            "cwd": "${workspaceFolder:FSKitSample}/fskit",
-            "name": "Release fuse (fskit)",
-            "program": "${workspaceFolder:FSKitSample}/fskit/.build/release/fuse",
-            "preLaunchTask": "swift: Build Release fuse (fskit)"
-        },
-        {
-            "type": "swift",
-            "request": "launch",
-            "args": [],
+            "args": ["-m", "/workspaces/FSKitSample/fuse-state.json", "-u", "/tmp/fuse-mount3-changes", "/tmp/fuse-mount3"],
             "cwd": "${workspaceFolder:FSKitSample}/fskit",
             "name": "Debug Fuse (fskit)",
             "program": "${workspaceFolder:FSKitSample}/fskit/.build/debug/Fuse",
-            "preLaunchTask": "swift: Build Debug Fuse (fskit)"
+            // "preLaunchTask": "swift: Build Debug Fuse"
         },
-        {
-            "type": "swift",
-            "request": "launch",
-            "args": [],
-            "cwd": "${workspaceFolder:FSKitSample}/fskit",
-            "name": "Release Fuse (fskit)",
-            "program": "${workspaceFolder:FSKitSample}/fskit/.build/release/Fuse",
-            "preLaunchTask": "swift: Build Release Fuse (fskit)"
-        }
+        // {
+        //     "type": "swift",
+        //     "request": "launch",
+        //     "args": [],
+        //     "cwd": "${workspaceFolder:FSKitSample}/fskit",
+        //     "name": "Release Fuse (fskit)",
+        //     "program": "${workspaceFolder:FSKitSample}/fskit/.build/release/Fuse",
+        //     "preLaunchTask": "swift: Build Release fuse (fskit)"
+        // }
     ]
 }
