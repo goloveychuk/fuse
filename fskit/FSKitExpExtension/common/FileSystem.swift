@@ -25,7 +25,7 @@ private struct RootNode {
 
 }
 
-class FileIdEncoder {
+final class FileIdEncoder: Sendable {
     // Static bit allocation for the tuple encoding
     private let bitAllocation = (
         value1Bits: 31,
@@ -146,13 +146,13 @@ class Visitor {
     }
 }
 
-public class FileSystem {
+public final class FileSystem: Sendable {
 
     private let rootNodes: [RootNode]
     private let zipCache: [PathSegment: CachedZip]
     private let fileIdEncoder = FileIdEncoder()
 
-    init(manifestPath: String, mutationsPath: String?) throws {
+    public init(manifestPath: String, mutationsPath: String?) throws {
         let data = try Data(contentsOf: URL(filePath: manifestPath))
         let depTree = try DependencyNode.fromJSONData(data)
         let writableConfig: WritableConfig? = if let mutationsPath = mutationsPath {
@@ -168,7 +168,7 @@ public class FileSystem {
 
 
     private func startCleaningWorker() {
-        Task.detached { [zipCache] in
+        Task { [zipCache] in
             while true {
                 try await Task.sleep(for: .seconds(20))
                 for (_, cachedZip) in zipCache {

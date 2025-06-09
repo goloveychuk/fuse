@@ -213,25 +213,7 @@ import common
 // }
 
 class Context {
-    private var rootNode: FSItemProtocol!
     var fileSystem: FileSystem!
-    private var nodeCache: [fuse_ino_t: FSItemProtocol] = [:]
-    func setRootNode(_ node: FSItemProtocol) {
-        rootNode = node
-        addNode(node)
-    }
-    func findNode(inode: fuse_ino_t) -> FSItemProtocol {
-        if (inode == 1) {
-            return rootNode
-        }
-        return nodeCache[inode]!
-    }
-    func addNode(_ node: FSItemProtocol) {
-        nodeCache[node.fileId.rawValue] = node
-    }
-    func removeNode(forInode inode: fuse_ino_t) {
-        nodeCache.removeValue(forKey: inode)
-    }
 }
 
 let context = Context()
@@ -345,11 +327,7 @@ func main() throws {
         // }
         let req = SendableAnything(req)
         // DispatchQueue.global().async {
-        let dirNode = context.findNode(inode: ino)
-
-        for (name, item) in try! dirNode.getChildren() { //todo try
-            context.addNode(item)
-        }
+    
 
         let fs = context.fileSystem!
 
@@ -362,7 +340,7 @@ func main() throws {
                 // sleep(10)
                 // try await Task.sleep(for: .seconds(1))
                 let _ = try await fs.enumerateDirectory(
-                    directory: dirNode, startingAt: FSDirectoryCookie(UInt64(off)),
+                    directory: FSItem.Identifier(rawValue: ino)!, startingAt: FSDirectoryCookie(UInt64(off)),
                     verifier: FSDirectoryVerifier(0),
                     attributes: attrReq,
                     packer: packer
@@ -391,10 +369,9 @@ func main() throws {
     // Mount point
     let mountPoint = CommandLine.arguments[3]
 
-    let fs = FileSystem()
+    let fs = try FileSystem(manifestPath: CommandLine.arguments[2], mutationsPath: CommandLine.arguments[3])
     context.fileSystem = fs
-    context.setRootNode(try fs.createRootNode(
-        manifestPath: CommandLine.arguments[2]))
+    
 
     // Create mount point if needed
     let fileManager = FileManager.default
