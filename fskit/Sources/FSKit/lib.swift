@@ -154,7 +154,7 @@ extension FSItem {
     // /// A request to get attributes from an item.
     // ///
     // /// Methods that retrieve attributes use this type and inspect the ``wantedAttributes`` property to determine which attributes to provide. FSKit calls the ``isAttributeWanted(_:)`` method to determine whether the request requires a given attribute.
-    public final class GetAttributesRequest : NSObject {
+    public final class GetAttributesRequest : NSObject, Sendable {
         
         /// The attributes requested by the request.
         ///

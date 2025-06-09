@@ -304,6 +304,9 @@ class SendableAnything<T>: @unchecked Sendable {
     }
 }
 
+let lookupGetAttr = FSItem.GetAttributesRequest([.fileID, .mode, .linkCount, .size])  //todo
+
+
 @MainActor
 func main() throws {
     print("Starting low-level FUSE filesystem...")
@@ -315,7 +318,33 @@ func main() throws {
     var operations = fuse_lowlevel_ops()
     // operations.init = ll_init
     // operations.destroy = ll_destroy
-    // operations.lookup = ll_lookup
+    operations.lookup = { (req, parent, name) in
+        let req = SendableAnything(req)
+        let fs = context.fileSystem!
+
+        let name =  String(cString: name!)
+
+        Task.detached {
+
+            print("lookup: parent=\(parent), name=\(name)")
+
+            do {
+                let item = try await fs.lookupItem(FSFileName(string: name), inDirectory: parent.toId())
+                var entry = fuse_entry_param()
+                memset(&entry, 0, MemoryLayout<fuse_entry_param>.size)
+                entry.ino = fuse_ino_t(item.0.rawValue)
+                entry.attr_timeout = TIMEOUT
+                entry.entry_timeout = TIMEOUT
+                let stat = try await fs.getAttributes(lookupGetAttr, of: item.0)
+
+                entry.attr = stat.toStat()
+
+                fuse_reply_entry(req.value, &entry)
+            } catch {
+                fuse_reply_err(req.value, EIO)  //todo err
+            }
+        }
+    }
     operations.readlink = { (req, ino) in
         let req = SendableAnything(req)
         let fs = context.fileSystem!
@@ -326,7 +355,6 @@ func main() throws {
             do {
                 let linkFileName = try await fs.readSymbolicLink(ino.toId())
                 _ = linkFileName.string!.withCString { cString in
-                    // print("readlink: linkFileName=\(cString)")
                     fuse_reply_readlink(req.value, cString)
                 }
             } catch {
@@ -363,7 +391,6 @@ func main() throws {
         Task.detached {
             let packer = PlusPacker(req: req.value, bufSize: size)
 
-            let attrReq = FSItem.GetAttributesRequest([.fileID, .mode, .linkCount, .size])  //todo
             print("readdirplus: starting enumeration")
             do {
                 // sleep(10)
@@ -372,7 +399,7 @@ func main() throws {
                     directory: ino.toId(),
                     startingAt: FSDirectoryCookie(UInt64(off)),
                     verifier: FSDirectoryVerifier(0),
-                    attributes: attrReq,
+                    attributes: lookupGetAttr,
                     packer: packer
                 )
                 let buf = packer.getBuf()
