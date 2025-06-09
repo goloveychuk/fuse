@@ -67,7 +67,7 @@ async function downloadFileOrCache(url: string): Promise<string> {
 
 async function unmountFuse(mountRoot: PortablePath) {
   // df -h /tmp/Volume
-  spawn('umount', [mountRoot], {
+  spawn('umount', ["-f", mountRoot], {
     //todo run in background
     // detached: true,
     stdio: 'inherit',
