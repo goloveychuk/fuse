@@ -11,11 +11,11 @@ enum LinkType: String, Decodable {
 
 // Define custom errors for dependency operations
 
-enum MyError: Error, LocalizedError, CustomNSError {
+public enum MyError: Error, LocalizedError, CustomNSError {
     case badManifest(String)
     case badMountParams
     
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .badManifest(let err):
             return "Bad manifest: \(err)"
@@ -36,7 +36,7 @@ enum MyError: Error, LocalizedError, CustomNSError {
     // CustomNSError implementation
     // static var errorDomain: String { return "FSKitExpExtension.MyError" }
     
-    var errorUserInfo: [String: Any] {
+    public var errorUserInfo: [String: Any] {
         return [
             NSLocalizedDescriptionKey: errorDescription ?? "",
             NSLocalizedFailureReasonErrorKey: failureReason ?? ""
