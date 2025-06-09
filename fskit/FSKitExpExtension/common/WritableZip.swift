@@ -32,6 +32,10 @@ class WritableZip: PublicZip {
         }
         self.listableZip = try ListableZip(fileURL: fileURL)
     }
+    
+    var listable: ListableZip {
+        return listableZip
+    }
 
     private func detachedFilePath(_ index: UInt) -> URL {
         return detachedDir.appendingPathComponent("\(index)")

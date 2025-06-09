@@ -291,11 +291,14 @@ struct ZipStat {
     let permissions: Permissions
 }
 
+
+
 protocol PublicZip {
     func stat(index: UInt) throws -> ZipStat
     func readLink(index: UInt) throws -> Data
     func readData(index: UInt, offset: off_t, length: Int, buffer: MutableBufferLike) throws -> Int
     func writeData(index: UInt, data: Data, offset: off_t) throws -> Int
+    var listable: ListableZip { get }
 } 
 
 
@@ -313,6 +316,10 @@ class ListableZip : PublicZip {
     private let parentMapping: [ZipID: Int]
     private let listings: Listings
     private let fileURL: URL
+
+    var listable: ListableZip {
+        return self
+    }
 
     func getIdForPath(path: ZipPath) throws -> ZipID {
         var currentId: ZipID = .root

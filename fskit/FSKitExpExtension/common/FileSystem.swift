@@ -96,11 +96,15 @@ public class FileSystem {
     private var rootNodes = [RootNode]()
     private var zipCache = [PathSegment: CachedZip]()
     private let fileIdEncoder = FileIdEncoder()
-    private var writableConfig: WritableConfig
+    private let writableConfig: WritableConfig?
     init(manifestPath: String, mutationsPath: String?) throws {
         let data = try Data(contentsOf: URL(filePath: manifestPath))
         let depTree = try DependencyNode.fromJSONData(data)
-        writableConfig = WritableConfig(mutationsPath: mutationsPath)
+        writableConfig = if let mutationsPath = mutationsPath {
+            WritableConfig(mutationsPath: mutationsPath)
+        } else {
+            nil
+        }
         _ = visit(dependencyNode: depTree, parentInd: 0)
         startCleaningWorker()
     }
@@ -141,7 +145,13 @@ public class FileSystem {
                 zipInfo = (cachedZip, subpath: info.subpath)
                 cachedZip.refCount += 1
             } else {
-                let cachedZip: CachedZip = CachedZip(writableConfig: writableConfig, zipPath: info.zipPath)
+                let cachedZip = CachedZip {
+                    if let writableConfig = self.writableConfig {
+                        try WritableZip(config: writableConfig, fileURL: URL(fileURLWithPath: info.zipPath))
+                    } else {
+                        try ListableZip(fileURL: URL(fileURLWithPath: info.zipPath))
+                    }
+                }
                 zipCache[info.zipPath] = cachedZip
                 zipInfo = (cachedZip, subpath: info.subpath)
             }
@@ -287,7 +297,7 @@ public class FileSystem {
 
         attr.fileID = getNodeId(rootNodeInd: rootNode.rootNodeInd, zipId: zipId)
         if req.isAttributeWanted(.parentID) {
-            let zipParent = listableZip.getParentForZipID(zipID: zipId)
+            let zipParent = listableZip.listable.getParentForZipID(zipID: zipId)
             attr.parentID = getNodeId(rootNodeInd: rootNode.rootNodeInd, zipId: zipParent)
         }
         attr.uid = uid
@@ -366,7 +376,7 @@ public class FileSystem {
             if let zipId = nodeData.zipId {
                 return (nil, (zipInfo, zipId))
             } else {
-                let zipId = try zipInfo.cachedZip.get().getIdForPath(
+                let zipId = try zipInfo.cachedZip.get().listable.getIdForPath(
                     path: ZipPath(path: zipInfo.subpath))
                 return (children, (zipInfo, zipId))
             }
@@ -380,7 +390,7 @@ public class FileSystem {
     private func getZipChildren(zipInfo: ZipInfo, zipId: ZipID) throws -> Indexed<ZipID> {
         let cachedZip = zipInfo.cachedZip
         let zip = try cachedZip.get()
-        let zipEntries = zip.getChildren(forId: zipId)
+        let zipEntries = zip.listable.getChildren(forId: zipId)
         return zipEntries
     }
 

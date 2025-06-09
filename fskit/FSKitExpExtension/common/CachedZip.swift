@@ -2,23 +2,25 @@ import Foundation
 import Synchronization
 
 let maxAge = TimeInterval(30)
-class CachedZip: @unchecked Sendable {
+
+typealias CachedZip = Cached<PublicZip>
+
+final class Cached<T>: @unchecked Sendable {
     private var rwlock: pthread_rwlock_t = pthread_rwlock_t()
     var refCount: UInt32
     private enum ZipState {
         case notLoaded
-        case loaded(WritableZip)
+        case loaded(T)
         case error(Error)
     }
     let lastUsedTime = Atomic<TimeInterval>(0)
     private var state: ZipState = .notLoaded
-    let zipPath: String
-    let writableConfig: WritableConfig
-    init(writableConfig: WritableConfig, zipPath: String) {
-        self.zipPath = zipPath
+    private let getZip: () throws -> T
+
+    init(_ getZip: @escaping () throws -> T) {
         refCount = 1 // todo not used
         pthread_rwlock_init(&rwlock, nil)
-        self.writableConfig = writableConfig
+        self.getZip = getZip
     }
 
     deinit {
@@ -39,7 +41,7 @@ class CachedZip: @unchecked Sendable {
         }
     }
 
-    func get() throws -> PublicZip {
+    func get() throws -> T { //todo async
         lastUsedTime.store(Date().timeIntervalSince1970, ordering: .relaxed)
         pthread_rwlock_rdlock(&rwlock)
 
@@ -66,7 +68,7 @@ class CachedZip: @unchecked Sendable {
                 throw error
             case .notLoaded:
                 do {
-                    let newZip = try WritableZip(config: writableConfig, fileURL: URL(fileURLWithPath: zipPath))
+                    let newZip = try getZip()
                     state = .loaded(newZip)
                     pthread_rwlock_unlock(&rwlock)
                     return newZip
