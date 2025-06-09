@@ -246,18 +246,20 @@ class PlusPacker: FSDirectoryEntryPacker {
         var entryParam = fuse_entry_param()
         memset(&entryParam, 0, MemoryLayout<fuse_entry_param>.size)
 
+        entryParam.ino = fuse_ino_t(itemID.rawValue)
+        entryParam.attr.st_ino = ino_t(itemID.rawValue)
+        entryParam.attr_timeout = TIMEOUT
+        entryParam.entry_timeout = TIMEOUT
+
         if name == "." || name == ".." {
-            entryParam.attr.st_ino = ino_t(itemID.rawValue)
-            entryParam.attr.st_mode = attributes!.mode
+            
+            entryParam.attr.st_mode = UInt32(Glibc.S_IFDIR | 0o755) //todo
         } else {
             // todo lookup_node=
-            entryParam.ino = fuse_ino_t(itemID.rawValue)
-            entryParam.attr.st_ino = ino_t(itemID.rawValue)
             entryParam.attr.st_mode = attributes!.mode
             entryParam.attr.st_nlink = attributes!.linkCount
             entryParam.attr.st_size = Int(attributes!.size)  //todo all attr conv
-            entryParam.attr_timeout = TIMEOUT
-            entryParam.entry_timeout = TIMEOUT
+            
         }
 
         let entrySize = name.withCString { cName in
