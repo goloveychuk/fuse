@@ -292,6 +292,8 @@ class SendableAnything<T>: @unchecked Sendable {
 func main() throws {
     print("Starting low-level FUSE filesystem...")
 
+    let pid = getpid()
+    print("Process ID: \(pid)")
     // let llfs = LLFS()
     // Initialize operations structure
     var operations = fuse_lowlevel_ops()
