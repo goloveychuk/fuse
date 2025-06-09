@@ -316,6 +316,24 @@ func main() throws {
     // operations.init = ll_init
     // operations.destroy = ll_destroy
     // operations.lookup = ll_lookup
+    operations.readlink = { (req, ino) in
+        let req = SendableAnything(req)
+        let fs = context.fileSystem!
+
+        Task.detached {
+            print("readlink: ino=\(ino)")
+            // Handle symbolic links
+            do {
+                let linkFileName = try await fs.readSymbolicLink(ino.toId())
+                _ = linkFileName.string!.withCString { cString in
+                    // print("readlink: linkFileName=\(cString)")
+                    fuse_reply_readlink(req.value, cString)
+                }
+            } catch {
+                fuse_reply_err(req.value, EIO)  //todo err
+            }
+        }
+    }
     operations.getattr = { (req, ino, fi) in
         let req = SendableAnything(req)
         let fs = context.fileSystem!
