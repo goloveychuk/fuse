@@ -219,6 +219,19 @@ class Context {
 let context = Context()
 let TIMEOUT = 10_000_000.0
 
+extension FSItem.Attributes {
+    func toStat() -> stat {
+        var st = stat()
+        memset(&st, 0, MemoryLayout<stat>.size)
+        st.st_ino = ino_t(self.fileID.rawValue)
+        st.st_mode = self.mode
+        st.st_nlink = self.linkCount
+        st.st_size = Int(self.size) 
+        // todo other attributes
+        return st
+    }
+}
+
 class PlusPacker: FSDirectoryEntryPacker {
     private let allBuf: UnsafeMutablePointer<Int8>
     private let allBufSize: Int
@@ -247,19 +260,14 @@ class PlusPacker: FSDirectoryEntryPacker {
         memset(&entryParam, 0, MemoryLayout<fuse_entry_param>.size)
 
         entryParam.ino = fuse_ino_t(itemID.rawValue)
-        entryParam.attr.st_ino = ino_t(itemID.rawValue)
         entryParam.attr_timeout = TIMEOUT
         entryParam.entry_timeout = TIMEOUT
 
         if name == "." || name == ".." {
-            
+            entryParam.attr.st_ino = ino_t(itemID.rawValue)            
             entryParam.attr.st_mode = UInt32(Glibc.S_IFDIR | 0o755) //todo
         } else {
-            // todo lookup_node=
-            entryParam.attr.st_mode = attributes!.mode
-            entryParam.attr.st_nlink = attributes!.linkCount
-            entryParam.attr.st_size = Int(attributes!.size)  //todo all attr conv
-            
+            entryParam.attr = attributes!.toStat()
         }
 
         let entrySize = name.withCString { cName in
@@ -280,6 +288,12 @@ class PlusPacker: FSDirectoryEntryPacker {
     }
     deinit {
         allBuf.deallocate()
+    }
+}
+
+extension fuse_ino_t {
+    func toId() -> FSItem.Identifier {
+        return FSItem.Identifier(rawValue: UInt64(self))!
     }
 }
 
@@ -304,22 +318,16 @@ func main() throws {
     // operations.lookup = ll_lookup
     operations.getattr = { (req, ino, fi) in
         let req = SendableAnything(req)
+        let fs = context.fileSystem!
+
         Task.detached {
 
             print("getattr: ino=\(ino)")
 
             // Define a dummy stat structure
-            var stbuf = stat()
-            memset(&stbuf, 0, MemoryLayout<stat>.size)
-
-            // Set dummy attributes
-            stbuf.st_ino = ino_t(ino)
-            stbuf.st_mode = S_IFDIR | 0o755
-            stbuf.st_nlink = 2
-            stbuf.st_size = 0
-
-            // Reply with the attributes
-            fuse_reply_attr(req.value, &stbuf, 1.0)
+            let stat = try await fs.getAttributes(FSItem.GetAttributesRequest([.uid, .modifyTime, .fileID, .type, .mode, .flags, .accessTime, .gid, .size, .birthTime]), of: ino.toId())
+            var st = stat.toStat()
+            fuse_reply_attr(req.value, &st, 1.0)
         }
     }
     operations.readdirplus = { (req, ino, size, off, fi) in
@@ -343,7 +351,7 @@ func main() throws {
                 // sleep(10)
                 // try await Task.sleep(for: .seconds(1))
                 let _ = try await fs.enumerateDirectory(
-                    directory: FSItem.Identifier(rawValue: ino)!,
+                    directory: ino.toId(),
                     startingAt: FSDirectoryCookie(UInt64(off)),
                     verifier: FSDirectoryVerifier(0),
                     attributes: attrReq,
