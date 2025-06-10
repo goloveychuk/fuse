@@ -342,7 +342,6 @@ func main() throws {
     // operations.open =  ?
     // operations.flush =  ?
     // operations.release =  ?
-    // operations.access =  todo check by default by os
 
     operations.lookup = { (req, parent, name) in
         let req = SendableAnything(req)
@@ -536,6 +535,8 @@ func main() throws {
         CommandLine.arguments[0],
         // "-f",  // Run in foreground
         "-d",  // Debug output
+        "-o",
+        "default_permissions"
         // mountPoint,
     ]
 
