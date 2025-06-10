@@ -7,7 +7,7 @@ enum ZipError: Error {
     case invalidListing(String)
 }
 
-struct Indexed<T> {
+struct Indexed<T: Sendable>: Sendable {
     typealias Key = FSFileName
 
     private var items: [Data: T] = [:]
@@ -150,7 +150,7 @@ extension Permissions {
     }
 }
 
-enum ZipID: Hashable {
+enum ZipID: Hashable, Sendable {
     case file(entryId: UInt)
     case symlink(entryId: UInt)
     case dir(listingId: UInt)
@@ -293,7 +293,7 @@ struct ZipStat {
 
 
 
-protocol PublicZip {
+protocol PublicZip: Sendable {
     func statEntry(index: UInt) throws -> ZipStat
     func readLink(index: UInt) throws -> Data
     func readData(index: UInt, offset: off_t, length: Int, buffer: MutableBufferLike) throws -> Int
@@ -302,7 +302,7 @@ protocol PublicZip {
 } 
 
 
-class ListableZip : PublicZip {
+final class ListableZip : PublicZip, Sendable {
 
     private static let SAFE_TIME: Date = Date(timeIntervalSince1970: 456_789_000)
     // static let S_IFMT: UInt32 = 0xF000  // File type mask

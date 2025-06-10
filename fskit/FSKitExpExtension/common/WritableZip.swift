@@ -10,11 +10,26 @@ struct WritableConfig {
     let mutationsPath: String
 }
 
-class WritableZip: PublicZip {
+final class ThreadSafeSet<T: Hashable>: @unchecked Sendable {
+    private var set: Set<T> = []
+    private let lock = NSLock()
+    func insert(_ element: T) {
+        lock.lock()
+        set.insert(element)
+        lock.unlock()
+    }
+    func contains(_ element: T) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return set.contains(element)
+    }
+}
+
+final class WritableZip: PublicZip, Sendable {
     let config: WritableConfig
 
-    var detached = Set<UInt>()
-    var listableZip: ListableZip
+    let detached = ThreadSafeSet<UInt>()
+    let listableZip: ListableZip
     let detachedDir: URL
     init(config: WritableConfig, fileURL: URL) throws {
         self.config = config
@@ -68,6 +83,7 @@ class WritableZip: PublicZip {
         }
     }
 
+    // I don't do proper locking because write is only for devvelopment usecase
     func writeData(index: UInt, data: Data, offset: off_t) throws -> Int {
         let detachedFile = detachedFilePath(index)
 
