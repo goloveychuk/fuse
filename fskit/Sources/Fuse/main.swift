@@ -233,7 +233,7 @@ extension FSItem.Attributes {
 }
 
 class PlusPacker: FSDirectoryEntryPacker {
-    private let allBuf: UnsafeMutablePointer<Int8>
+    private var data: Data
     private let allBufSize: Int
     private var bufused: size_t = 0
     private let req: fuse_req_t?
@@ -241,7 +241,7 @@ class PlusPacker: FSDirectoryEntryPacker {
     init(req: fuse_req_t?, bufSize: Int) {
         allBufSize = bufSize
         self.req = req
-        allBuf = UnsafeMutablePointer<Int8>.allocate(capacity: Int(bufSize)) //todo change to data
+        data = Data(capacity: Int(bufSize)) //todo change to data
     }
 
     func packEntry(
@@ -276,24 +276,25 @@ class PlusPacker: FSDirectoryEntryPacker {
             entry_timeout: TIMEOUT
         )
 
+
         let entrySize = name.withCString { cName in
-            fuse_add_direntry_plus(
-                req, allBuf.advanced(by: bufused), remaining, cName, &entry,
-                Int(nextCookie.rawValue))
+            data.withUnsafeMutableBytes { allBuf in
+                fuse_add_direntry_plus(
+                   req, allBuf.baseAddress!.advanced(by: bufused), remaining, cName, &entry,
+                    Int(nextCookie.rawValue))
+            }
         }
         if entrySize > remaining {
             // todo do_forget() because I got ino
             // Entry doesn't fit, stop here
             return false
         }
+        // data.advanced(by: 2)
         bufused += entrySize
         return true
     }
-    func getBuf() -> (buf: UnsafeMutablePointer<Int8>, used: size_t) {
-        return (buf: allBuf, used: bufused)
-    }
-    deinit {
-        allBuf.deallocate()
+    func getBuf() -> (data: Data, used: size_t) {
+        return (data: data, used: bufused)
     }
 }
 
@@ -430,7 +431,10 @@ func main() throws {
                 let buf = packer.getBuf()
 
                 print("readdirplus: replied with \(buf.used) bytes")
-                fuse_reply_buf(req.value, buf.buf, buf.used)
+                _ = buf.data.withUnsafeBytes { rawBuffer in
+                    fuse_reply_buf(req.value, rawBuffer.baseAddress, buf.used)
+                }
+                
             } catch {
                 print("readdirplus: error occurred")
                 fuse_reply_err(req.value, EIO)  //todo err
