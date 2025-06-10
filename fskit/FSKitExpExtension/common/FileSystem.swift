@@ -298,7 +298,7 @@ public final class FileSystem: Sendable {
     ) throws -> FSItem.Attributes {
         let attr = FSItem.Attributes()
         guard case .zip(let zipInfo, _) = rootNode.node else {
-            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+            throw fs_errorForPOSIXError(POSIXError.EIO)
         }
         let cachedZip = zipInfo.cachedZip
         let listableZip = try cachedZip.get()
@@ -350,14 +350,14 @@ public final class FileSystem: Sendable {
         // todo . and ..?
         let strName = name.string!
         if strName == "." || strName == ".." {
-            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+            throw fs_errorForPOSIXError(POSIXError.EIO)
         }
         let nodeData = getNodeByFileId(directory)
         let childrenData = try getChildrenData(nodeData: nodeData)
 
         if let children = childrenData.children {
             guard let strName = name.string else {
-                throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
+                throw fs_errorForPOSIXError(POSIXError.ENOENT)
             }
             if let child = children[strName] {
                 let identifier = getNodeId(rootNodeInd: child.rootNodeInd, zipId: nil)
@@ -371,8 +371,7 @@ public final class FileSystem: Sendable {
                 return (identifier, name)
             }
         }
-
-        throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
+        throw fs_errorForPOSIXError(POSIXError.ENOENT)
     }
 
     private func getChildrenData(nodeData: Inode) throws -> (
@@ -509,7 +508,7 @@ public final class FileSystem: Sendable {
         let nodeData = getNodeByFileId(fileID)
         if let zipId = nodeData.zipId {
             guard case .zip(let zipInfo, _) = nodeData.rootNode.node else {
-                throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+                throw fs_errorForPOSIXError(POSIXError.EIO)
             }
             if case .symlink(let entryInd) = zipId {
                 let listableZip = try zipInfo.cachedZip.get()
@@ -521,50 +520,50 @@ public final class FileSystem: Sendable {
                 return FSFileName(string: data)
             }
         }
-        throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+        throw fs_errorForPOSIXError(POSIXError.EIO)
     }
 
-    func writeData(_ fileId: FSItem.Identifier, data: Data, offset: off_t) async throws -> Int {
+    public  func writeData(_ fileId: FSItem.Identifier, data: Data, offset: off_t) async throws -> Int {
         let nodeData = getNodeByFileId(fileId)
         guard let zipId = nodeData.zipId else {
-            throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
+            throw fs_errorForPOSIXError(POSIXError.EROFS)
         }
         guard case .zip(let zipInfo, _) = nodeData.rootNode.node else {
-            throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
+            throw fs_errorForPOSIXError(POSIXError.EROFS)
         }
         switch zipId {
         case .symlink(_):
-            throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
+            throw fs_errorForPOSIXError(POSIXError.EROFS)
         case .file(let entryInd):
             let listableZip = try zipInfo.cachedZip.get()
             return try listableZip.writeData(index: entryInd, data: data, offset: offset)
         case .dir(_):
-            throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
+            throw fs_errorForPOSIXError(POSIXError.EROFS)
         }
     }
 
-    func readData(
+    public func readData(
         _ fileID: FSItem.Identifier, offset: off_t, length: Int,
         into buffer: MutableBufferLike
     ) async throws -> Int {
         let nodeData = getNodeByFileId(fileID)
 
         guard let zipId = nodeData.zipId else {
-            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+            throw fs_errorForPOSIXError(POSIXError.EIO)
         }
         guard case .zip(let zipInfo, _) = nodeData.rootNode.node else {
-            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+            throw fs_errorForPOSIXError(POSIXError.EIO)
         }
         switch zipId {
         case .symlink(_):
-            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+            throw fs_errorForPOSIXError(POSIXError.EIO)
 
         case .file(let entryInd):
             let listableZip = try zipInfo.cachedZip.get()
             return try listableZip.readData(index: entryInd, offset: offset, length: length, buffer: buffer)
             
         case .dir(_):
-            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+            throw fs_errorForPOSIXError(POSIXError.EIO)
         }
     }
 

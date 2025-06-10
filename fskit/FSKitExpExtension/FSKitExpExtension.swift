@@ -8,6 +8,11 @@
 import FSKit
 import Foundation
 
+public func fs_errorForPOSIXError(_ err: POSIXErrorCode) -> any Error {
+    return fs_errorForPOSIXError(err.rawValue)
+
+}
+
 extension FSItem.GetAttributesRequest {
     convenience init(_ wantedAttributes: FSItem.Attribute) {
         self.init()

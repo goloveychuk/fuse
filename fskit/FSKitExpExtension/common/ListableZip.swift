@@ -258,19 +258,19 @@ typealias Listings = [Indexed<ZipID>]
 //     }
 // }
 
-protocol MutableBufferLike {
+public protocol MutableBufferLike {
     var length: Int {get}
     func withUnsafeMutableBytes<R>(_ body: (UnsafeMutableRawBufferPointer) throws -> R) rethrows -> R
 }
 
-class DataBufferWrapper: MutableBufferLike {
+public class DataBufferWrapper: MutableBufferLike {
     var data: Data
-    var length: Int
-    init(capacity: Int) {
+    public var length: Int
+    public init(capacity: Int) {
         self.data = Data(capacity: capacity)
         self.length = capacity
     }
-    func withUnsafeMutableBytes<R>(_ body: (UnsafeMutableRawBufferPointer) throws -> R) rethrows -> R {
+    public func withUnsafeMutableBytes<R>(_ body: (UnsafeMutableRawBufferPointer) throws -> R) rethrows -> R {
         return try body(data.withUnsafeMutableBytes { $0 })
     }
 }
@@ -353,13 +353,13 @@ class ListableZip : PublicZip {
     public func readLink(index: UInt) throws -> Data {
         let zipEntry = getEntry(index: index)
         if zipEntry.compressionMethod != .store {
-            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+            throw fs_errorForPOSIXError(POSIXError.EIO)
         }
         return try rawReadAllDataIntoBuffer(index: index)
     }
 
     func writeData(index: UInt, data: Data, offset: off_t) throws -> Int {
-        throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
+        throw fs_errorForPOSIXError(POSIXError.EROFS)
     }
 
     func statEntry(index: UInt) -> ZipStat {
@@ -369,7 +369,7 @@ class ListableZip : PublicZip {
 
     public func readData(index: UInt, offset: off_t, length: Int, buffer: MutableBufferLike) throws -> Int {
         if (buffer.length != length) {
-            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue) //todo
+            throw fs_errorForPOSIXError(POSIXError.EIO) //todo
         }
         let zipEntry = getEntry(index: index)
             switch zipEntry.compressionMethod {
@@ -412,7 +412,7 @@ class ListableZip : PublicZip {
                     if bytesRead > 0 {  //todo think
                         return bytesRead
                     } else {
-                        throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+                        throw fs_errorForPOSIXError(POSIXError.EIO)
                     }
                 }
             }
@@ -427,7 +427,7 @@ class ListableZip : PublicZip {
                 bufferPointer: body)
         }
         if read != zipEntry.compressedSize {
-            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+            throw fs_errorForPOSIXError(POSIXError.EIO)
         }
         return data
     }

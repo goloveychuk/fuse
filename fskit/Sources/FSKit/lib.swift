@@ -25,10 +25,12 @@ public typealias FSItem = NSObject
 // open class FSItem : NSObject {
 
 // }
+extension POSIXErrorCode: Error {
+    
+}
 
-public func fs_errorForPOSIXError(_: Int32) -> any Error {
-
-    return NSError(domain: "domain", code: 0, userInfo: nil)
+public func fs_errorForPOSIXError(_ err: POSIXErrorCode) -> any Error {
+    return err
 }
 
 public struct FSDirectoryVerifier: Sendable {  //not used

@@ -247,7 +247,7 @@ extension MyFSVolume: FSVolume.Operations {
         // replyHandler: @escaping (FSDirectoryVerifier, (any Error)?) -> Void
     ) async throws -> FSDirectoryVerifier {
         guard let directory = directory as? MyFSItem else {
-            throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
+            throw fs_errorForPOSIXError(POSIXError.ENOENT)
         }
         return try await fs.enumerateDirectory(directory: directory.fileId, startingAt: cookie, verifier: verifier, attributes: req, packer: packer)
     }
@@ -257,7 +257,7 @@ extension MyFSVolume: FSVolume.Operations {
         of item: FSItem
     ) async throws -> FSItem.Attributes {
         guard let item = item as? MyFSItem else {
-            throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
+            throw fs_errorForPOSIXError(POSIXError.ENOENT)
         }
         return try await fs.getAttributes(desiredAttributes, of: item.fileId)
     }
@@ -269,7 +269,7 @@ extension MyFSVolume: FSVolume.Operations {
         // logger.debug("lookupName: \(String(describing: name.string)), \(directory)")
 
         guard let directory = directory as? MyFSItem else {
-            throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
+            throw fs_errorForPOSIXError(POSIXError.ENOENT)
         }
 
         let result = try await fs.lookupItem(name, inDirectory: directory.fileId)
@@ -286,7 +286,7 @@ extension MyFSVolume: FSVolume.Operations {
         _ item: FSItem
     ) async throws -> FSFileName {
         guard let item = item as? MyFSItem else {
-            throw fs_errorForPOSIXError(POSIXError.ENOENT.rawValue)
+            throw fs_errorForPOSIXError(POSIXError.ENOENT)
         }
         return try await fs.readSymbolicLink(item.fileId)
     }
@@ -297,7 +297,7 @@ extension MyFSVolume: FSVolume.Operations {
         on item: FSItem
     ) async throws -> FSItem.Attributes {
         return newAttributes //todo
-        // throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
+        // throw fs_errorForPOSIXError(POSIXError.EROFS)
     }
 
     func createItem(
@@ -306,7 +306,7 @@ extension MyFSVolume: FSVolume.Operations {
         inDirectory directory: FSItem,
         attributes newAttributes: FSItem.SetAttributesRequest
     ) async throws -> (FSItem, FSFileName) {
-        throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
+        throw fs_errorForPOSIXError(POSIXError.EROFS)
     }
 
     func createSymbolicLink(
@@ -341,7 +341,7 @@ extension MyFSVolume: FSVolume.Operations {
 
         // }
 
-        throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
+        throw fs_errorForPOSIXError(POSIXError.EROFS)
 
     }
 
@@ -350,7 +350,7 @@ extension MyFSVolume: FSVolume.Operations {
         named name: FSFileName,
         inDirectory directory: FSItem
     ) async throws -> FSFileName {
-        throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
+        throw fs_errorForPOSIXError(POSIXError.EROFS)
     }
 
     func removeItem(
@@ -358,7 +358,7 @@ extension MyFSVolume: FSVolume.Operations {
         named name: FSFileName,
         fromDirectory directory: FSItem
     ) async throws {
-        throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
+        throw fs_errorForPOSIXError(POSIXError.EROFS)
     }
 
     func renameItem(
@@ -369,7 +369,7 @@ extension MyFSVolume: FSVolume.Operations {
         inDirectory destinationDirectory: FSItem,
         overItem: FSItem?
     ) async throws -> FSFileName {
-        throw fs_errorForPOSIXError(POSIXError.EROFS.rawValue)
+        throw fs_errorForPOSIXError(POSIXError.EROFS)
     }
 
 }
@@ -399,14 +399,14 @@ extension MyFSVolume: FSVolume.ReadWriteOperations {
         from item: FSItem, at offset: off_t, length: Int, into buffer: FSMutableFileDataBuffer
     ) async throws -> Int {
         guard let item = item as? MyFSItem else {
-            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+            throw fs_errorForPOSIXError(POSIXError.EIO)
         }
         return try await fs.readData(item.fileId, offset: offset, length: length, into: buffer)
     }
 
     func write(contents: Data, to item: FSItem, at offset: off_t) async throws -> Int {
         guard let item = item as? MyFSItem else {
-            throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+            throw fs_errorForPOSIXError(POSIXError.EIO)
         }
 
         return try await fs.writeData(item.fileId, data: contents, offset: offset)

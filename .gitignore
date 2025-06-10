@@ -14,6 +14,7 @@ node_modules
 
 **/.yarn/install-state.gz
 **/.yarn/fuse-state.json
+**/.yarn/cache
 yarn-fuse
 fuse/output/
 

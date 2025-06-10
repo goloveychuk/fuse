@@ -30,7 +30,8 @@
             ],
             "cwd": "${workspaceFolder:FSKitSample}/fskit",
             "name": "Debug Fuse (fskit)",
-            "program": "${workspaceFolder:FSKitSample}/fskit/.build/debug/Fuse"
+            "program": "${workspaceFolder:FSKitSample}/fskit/.build/debug/Fuse",
+            "preLaunchTask": "swift: Build Debug Fuse (fskit)"
         },
         {
             "type": "swift",
