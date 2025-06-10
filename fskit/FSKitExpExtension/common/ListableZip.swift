@@ -505,9 +505,9 @@ final class ListableZip : PublicZip, Sendable {
     }
 
 
-    init(fileURL: URL) throws {
+    init(fileURL: URL) async throws {
         self.fileURL = fileURL
-        let entries = try ListableZip.readZipEntries(fileURL: fileURL)
+        let entries = try await ListableZip.readZipEntries(fileURL: fileURL)
         var listings = Listings()
         var parentMapping = [ZipID: Int]()
         var allEntries = [MinEntry]()
@@ -566,7 +566,7 @@ final class ListableZip : PublicZip, Sendable {
         self.allEntries = allEntries
     }
 
-    private static func readZipEntries(fileURL: URL) throws -> [ZipEntry] {
+    private static func readZipEntries(fileURL: URL) async throws -> [ZipEntry] {
         let fileHandle = try FileHandle(forReadingFrom: fileURL)
         defer {
             try? fileHandle.close()

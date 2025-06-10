@@ -5,79 +5,87 @@ let maxAge = TimeInterval(30)
 
 typealias CachedZip = Cached<PublicZip>
 
-final class Cached<T>: @unchecked Sendable {
-    private var rwlock: pthread_rwlock_t = pthread_rwlock_t()
+actor AsyncMemoize<T: Sendable> {
+    private var result: Result<T, Error>?
+    private var isLoading = false
+    private var continuations = [CheckedContinuation<T, Error>]()
+    private let task: () async throws -> T
+    
+    init(_ task: @escaping () async throws -> T) {
+        self.task = task
+    }
+
+    func clear() {
+        result = nil
+    }
+    
+    func callAsFunction() async throws -> T {
+        // Return cached result if available
+        if let result = result {
+            return try result.get()
+        }
+        
+        // If already loading, wait for completion
+        if isLoading {
+            return try await withCheckedThrowingContinuation { continuation in
+                continuations.append(continuation)
+            }
+        }
+        
+        // Start loading
+        isLoading = true
+        
+        do {
+            let value = try await task()
+            result = .success(value)
+            
+            // Resume any waiting continuations
+            for continuation in continuations {
+                continuation.resume(returning: value)
+            }
+            continuations.removeAll()
+            isLoading = false
+            
+            return value
+        } catch {
+            result = .failure(error)
+            
+            // Resume any waiting continuations with error
+            for continuation in continuations {
+                continuation.resume(throwing: error)
+            }
+            continuations.removeAll()
+            isLoading = false
+            
+            throw error
+        }
+    }
+}
+
+
+
+final class Cached<T: Sendable>: @unchecked Sendable {
+
     var refCount: UInt32
-    private enum ZipState {
-        case notLoaded
-        case loaded(T)
-        case error(Error)
-    }
     let lastUsedTime = Atomic<TimeInterval>(0)
-    private var state: ZipState = .notLoaded
-    private let getZip: () throws -> T
+    private let memoized: AsyncMemoize<T>
 
-    init(_ getZip: @escaping () throws -> T) {
+    init(_ getZip: @escaping @Sendable () async throws -> T) {
         refCount = 1
-        pthread_rwlock_init(&rwlock, nil)
-        self.getZip = getZip
+        self.memoized = AsyncMemoize(getZip)
     }
 
-    deinit {
-        pthread_rwlock_destroy(&rwlock)
-    }
 
-    private func clear() {
-        pthread_rwlock_wrlock(&rwlock)
-        self.state = .notLoaded  // todo check errored
-        pthread_rwlock_unlock(&rwlock)
-    }
-
-    func cleanIfNeeded() {
+    func cleanIfNeeded() async {
         let now = Date().timeIntervalSince1970
         let lastUsed = lastUsedTime.load(ordering: .relaxed)
         if now - lastUsed > maxAge {
-            clear()
+            await memoized.clear()
         }
     }
 
-    func get() throws -> T { //todo async
+    func get() async throws -> T {
         lastUsedTime.store(Date().timeIntervalSince1970, ordering: .relaxed)
-        pthread_rwlock_rdlock(&rwlock)
-
-        switch state {
-        case .loaded(let zip):
-            pthread_rwlock_unlock(&rwlock)
-            return zip
-        case .error(let error):
-            pthread_rwlock_unlock(&rwlock)
-            throw error
-        case .notLoaded:
-            pthread_rwlock_unlock(&rwlock)
-
-            // Upgrade to write lock to load the zip
-            pthread_rwlock_wrlock(&rwlock)
-
-            // Check state again after acquiring write lock
-            switch state {
-            case .loaded(let zip):
-                pthread_rwlock_unlock(&rwlock)
-                return zip
-            case .error(let error):
-                pthread_rwlock_unlock(&rwlock)
-                throw error
-            case .notLoaded:
-                do {
-                    let newZip = try getZip()
-                    state = .loaded(newZip)
-                    pthread_rwlock_unlock(&rwlock)
-                    return newZip
-                } catch {
-                    state = .error(error)
-                    pthread_rwlock_unlock(&rwlock)
-                    throw error
-                }
-            }
-        }
+        return try await memoized.callAsFunction()
     }
 }

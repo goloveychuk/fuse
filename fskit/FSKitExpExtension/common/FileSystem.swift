@@ -118,11 +118,11 @@ class Visitor {
                 zipInfo = (cachedZip, subpath: info.subpath)
                 cachedZip.refCount += 1
             } else {
-                let cachedZip = CachedZip {
-                    if let writableConfig = self.writableConfig {
-                        try WritableZip(config: writableConfig, fileURL: URL(fileURLWithPath: info.zipPath))
+                let cachedZip = CachedZip { [writableConfig] in
+                    if let writableConfig = writableConfig {
+                        try await WritableZip(config: writableConfig, fileURL: URL(fileURLWithPath: info.zipPath))
                     } else {
-                        try ListableZip(fileURL: URL(fileURLWithPath: info.zipPath))
+                        try await ListableZip(fileURL: URL(fileURLWithPath: info.zipPath))
                     }
                 }
                 zipCache[info.zipPath] = cachedZip
@@ -172,7 +172,7 @@ public final class FileSystem: Sendable {
             while true {
                 try await Task.sleep(for: .seconds(20))
                 for (_, cachedZip) in zipCache {
-                    cachedZip.cleanIfNeeded()
+                    await cachedZip.cleanIfNeeded()
                 }
             }
         }
@@ -227,12 +227,12 @@ public final class FileSystem: Sendable {
         return FSItem.Identifier(rawValue: fileId + FSItem.Identifier.rootDirectory.rawValue)!  //check overflow
     }
 
-    private func getAttributesForNodeData(nodeData: Inode, req: FSItem.GetAttributesRequest) throws
+    private func getAttributesForNodeData(nodeData: Inode, req: FSItem.GetAttributesRequest) async throws
         -> FSItem.Attributes
     {
         var attributes: FSItem.Attributes
         if let zipId = nodeData.zipId {
-            attributes = try getAttributesForZipID(
+            attributes = try await getAttributesForZipID(
                 zipId: zipId, rootNode: nodeData.rootNode, req: req)
         } else {
             attributes = getAttributesForRootNode(node: nodeData.rootNode, req: req)
@@ -295,13 +295,13 @@ public final class FileSystem: Sendable {
 
     private func getAttributesForZipID(
         zipId: ZipID, rootNode: RootNode, req: FSItem.GetAttributesRequest
-    ) throws -> FSItem.Attributes {
+    ) async throws -> FSItem.Attributes {
         let attr = FSItem.Attributes()
         guard case .zip(let zipInfo, _) = rootNode.node else {
             throw fs_errorForPOSIXError(POSIXError.EIO)
         }
         let cachedZip = zipInfo.cachedZip
-        let listableZip = try cachedZip.get()
+        let listableZip = try await cachedZip.get()
 
         attr.fileID = getNodeId(rootNodeInd: rootNode.rootNodeInd, zipId: zipId)
         if req.isAttributeWanted(.parentID) {
@@ -340,7 +340,7 @@ public final class FileSystem: Sendable {
         // let wanted = desiredAttributes.printRequestedAttributes
         // "modifyTime, size, birthTime, parentID, type, flags, allocSize, mode, linkCount, changeTime, accessTime, fileID, "
         let nodeData = getNodeByFileId(fileId)
-        return try getAttributesForNodeData(nodeData: nodeData, req: desiredAttributes)
+        return try await getAttributesForNodeData(nodeData: nodeData, req: desiredAttributes)
     }
 
     public func lookupItem(
@@ -353,7 +353,7 @@ public final class FileSystem: Sendable {
             throw fs_errorForPOSIXError(POSIXError.EIO)
         }
         let nodeData = getNodeByFileId(directory)
-        let childrenData = try getChildrenData(nodeData: nodeData)
+        let childrenData = try await getChildrenData(nodeData: nodeData)
 
         if let children = childrenData.children {
             guard let strName = name.string else {
@@ -365,7 +365,7 @@ public final class FileSystem: Sendable {
             }
         }
         if let (zipInfo, zipId) = childrenData.childrenForZipId {
-            let zipEntries = try getZipChildren(zipInfo: zipInfo, zipId: zipId)
+            let zipEntries = try await getZipChildren(zipInfo: zipInfo, zipId: zipId)
             if let child = zipEntries[name] {
                 let identifier = getNodeId(rootNodeInd: nodeData.rootNode.rootNodeInd, zipId: child)
                 return (identifier, name)
@@ -374,7 +374,7 @@ public final class FileSystem: Sendable {
         throw fs_errorForPOSIXError(POSIXError.ENOENT)
     }
 
-    private func getChildrenData(nodeData: Inode) throws -> (
+    private func getChildrenData(nodeData: Inode) async throws -> (
         children: OrderedDictionary<PathSegment, RootNode>?, childrenForZipId: (ZipInfo, ZipID)?
     ) {
         switch nodeData.rootNode.node {
@@ -388,7 +388,7 @@ public final class FileSystem: Sendable {
                 }
                 return (nil, (zipInfo, zipId))
             } else {
-                let zipId = try zipInfo.cachedZip.get().listable.getIdForPath(
+                let zipId = try await zipInfo.cachedZip.get().listable.getIdForPath(
                     path: ZipPath(path: zipInfo.subpath))
                 guard case .dir(_) = zipId else {
                     throw fs_errorForPOSIXError(POSIXError.ENOTDIR)
@@ -402,9 +402,9 @@ public final class FileSystem: Sendable {
         }
     }
 
-    private func getZipChildren(zipInfo: ZipInfo, zipId: ZipID) throws -> Indexed<ZipID> {
+    private func getZipChildren(zipInfo: ZipInfo, zipId: ZipID) async throws -> Indexed<ZipID> {
         let cachedZip = zipInfo.cachedZip
-        let zip = try cachedZip.get()
+        let zip = try await cachedZip.get()
         let zipEntries = zip.listable.getChildren(forId: zipId)
         return zipEntries
     }
@@ -434,7 +434,7 @@ public final class FileSystem: Sendable {
         }
 
         if cookie.rawValue <= currentOffset {
-            let attributes = try getAttributesForNodeData(
+            let attributes = try await getAttributesForNodeData(
                 nodeData: nodeData, req: FSItem.GetAttributesRequest([.parentID]))
             guard
                 packer.packEntry(
@@ -448,7 +448,7 @@ public final class FileSystem: Sendable {
             currentOffset += 1
         }
 
-        let childrenData = try getChildrenData(nodeData: nodeData)
+        let childrenData = try await getChildrenData(nodeData: nodeData)
 
         if let children = childrenData.children {
             for (name, child) in children.entries() {
@@ -475,7 +475,7 @@ public final class FileSystem: Sendable {
         }
 
         if let (zipInfo, zipId) = childrenData.childrenForZipId {
-            let zipEntries = try getZipChildren(zipInfo: zipInfo, zipId: zipId)
+            let zipEntries = try await getZipChildren(zipInfo: zipInfo, zipId: zipId)
             for (name, zipId) in zipEntries.entries() {
                 if let children = childrenData.children {
                     if children[name.string!] != nil {
@@ -495,7 +495,7 @@ public final class FileSystem: Sendable {
                     itemID: getNodeId(rootNodeInd: nodeData.rootNode.rootNodeInd, zipId: zipId),
                     nextCookie: FSDirectoryCookie(UInt64(currentOffset + 1)),
                     attributes: req != nil
-                        ? try getAttributesForZipID(
+                        ? try await getAttributesForZipID(
                             zipId: zipId, rootNode: nodeData.rootNode, req: req!) : nil,
                 )
 
@@ -518,7 +518,7 @@ public final class FileSystem: Sendable {
                 throw fs_errorForPOSIXError(POSIXError.EIO)
             }
             if case .symlink(let entryInd) = zipId {
-                let listableZip = try zipInfo.cachedZip.get()
+                let listableZip = try await zipInfo.cachedZip.get()
                 let data = try listableZip.readLink(index: entryInd)
                 return FSFileName(data: data)
             }
@@ -542,7 +542,7 @@ public final class FileSystem: Sendable {
         case .symlink(_):
             throw fs_errorForPOSIXError(POSIXError.EROFS)
         case .file(let entryInd):
-            let listableZip = try zipInfo.cachedZip.get()
+            let listableZip = try await zipInfo.cachedZip.get()
             return try listableZip.writeData(index: entryInd, data: data, offset: offset)
         case .dir(_):
             throw fs_errorForPOSIXError(POSIXError.EROFS)
@@ -566,7 +566,7 @@ public final class FileSystem: Sendable {
             throw fs_errorForPOSIXError(POSIXError.EIO)
 
         case .file(let entryInd):
-            let listableZip = try zipInfo.cachedZip.get()
+            let listableZip = try await zipInfo.cachedZip.get()
             return try listableZip.readData(index: entryInd, offset: offset, length: length, buffer: buffer)
             
         case .dir(_):
