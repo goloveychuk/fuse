@@ -81,7 +81,7 @@ class WritableZip: PublicZip {
 
             let read = try listableZip.readData(index: index, offset: 0, length: length, buffer: buffer)
             if read != length {
-                throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+                throw fs_errorForPOSIXError(POSIXError.EIO)
             }
             try buffer.data.write(to: detachedFile)
             detached.insert(index)

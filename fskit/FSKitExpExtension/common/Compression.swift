@@ -22,7 +22,7 @@ func decompressDeflate(compressedData: Data, destinationSize: Int) throws -> Dat
     // }
 
     // if bytesDecompressed != destinationSize {
-    //     throw fs_errorForPOSIXError(POSIXError.EIO.rawValue)
+    //     throw fs_errorForPOSIXError(POSIXError.EIO)
     // }
     // return decompressedData
 }

@@ -156,7 +156,7 @@ class FuseInstaller implements Installer {
     this.indexFolderPromise = setupCopyIndex(xfs, {
       indexPath: ppath.join(opts.project.configuration.get(`globalFolder`), `index`),
     });
-    this.fuseIsSupported = false;
+    this.fuseIsSupported = true;
   }
 
   private customData: FuseCustomData = {

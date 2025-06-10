@@ -315,6 +315,13 @@ class SendableAnything<T>: @unchecked Sendable {
         self.value = value
     }
 }
+func reply_err(_ req: fuse_req_t?, _ error: Error) {
+    if let err = error as? POSIXErrorCode {
+        fuse_reply_err(req, err.rawValue)  //todo err
+    } else {
+        fuse_reply_err(req, EIO)  //todo err
+    }
+}
 
 let lookupGetAttr = FSItem.GetAttributesRequest([.fileID, .mode, .linkCount, .size])  //todo
 
@@ -363,7 +370,7 @@ func main() throws {
 
                 fuse_reply_entry(req.value, &entry)
             } catch {
-                fuse_reply_err(req.value, EIO)  //todo err
+                reply_err(req.value, error)  //todo err
             }
         }
     }
@@ -380,7 +387,7 @@ func main() throws {
                     fuse_reply_readlink(req.value, cString)
                 }
             } catch {
-                fuse_reply_err(req.value, EIO)  //todo err
+                reply_err(req.value, error)  //todo err
             }
         }
     }
@@ -402,13 +409,50 @@ func main() throws {
             fuse_reply_attr(req.value, &st, TIMEOUT)
         }
     }
+    operations.read = { (req, ino, size, offset, fi) in
+    let req = SendableAnything(req)
+    let fs = context.fileSystem!
+    
+    Task.detached {
+        print("read: ino=\(ino), size=\(size), offset=\(offset)")
+        let buffer = DataBufferWrapper(capacity: Int(size))
+        do {
+
+            let written = try await fs.readData(
+                ino.toId(), 
+                offset: offset,
+                length: size,
+                into: buffer,
+            )
+
+            _ = buffer.withUnsafeMutableBytes { rawBuffer in
+                fuse_reply_buf(req.value, rawBuffer.baseAddress!, written)
+            }
+
+            // // Use zero-copy reply when possible
+            // if let mappedData = fileData.zeroCopyData {
+            //     // Option 1: Zero-copy using fuse_buf with FUSE_BUF_IS_FD flag
+            //     var buf = fuse_bufvec(count: 1, idx: 0, off: 0, buf: [
+            //         fuse_buf(
+            //             size: mappedData.size,
+            //             flags: UInt32(FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK),
+            //             fd: mappedData.fd,
+            //             pos: mappedData.position
+            //         )
+            //     ])
+            //     fuse_reply_data(req.value, &buf, UInt32(FUSE_BUF_COPY_FLAGS))
+            // } else {
+            //     // Option 2: Standard reply for when zero-copy isn't possible
+            //     // Use the regular data buffer
+                
+            // }
+        } catch {
+            reply_err(req.value, error)
+        }
+    }
+}
+
     operations.readdirplus = { (req, ino, size, off, fi) in
-        // Only support root directory (ino == 1)
-        // print("readdirplus: ino=\(ino), size=\(size), off=\(off)")
-        // guard ino == 1 else {
-        //     fuse_reply_err(req, ENOENT)
-        //     return
-        // }
         let req = SendableAnything(req)
         // DispatchQueue.global().async {
 
@@ -436,8 +480,7 @@ func main() throws {
                 }
                 
             } catch {
-                print("readdirplus: error occurred")
-                fuse_reply_err(req.value, EIO)  //todo err
+                reply_err(req.value, error)
             }
 
         }
