@@ -379,13 +379,20 @@ public final class FileSystem: Sendable {
     ) {
         switch nodeData.rootNode.node {
         case .softLink(_):
-            return (nil, nil)
+            throw fs_errorForPOSIXError(POSIXError.ENOTDIR)
+            // return (nil, nil)
         case .zip(let zipInfo, let children):
             if let zipId = nodeData.zipId {
+                guard case .dir(_) = zipId else {
+                    throw fs_errorForPOSIXError(POSIXError.ENOTDIR)
+                }
                 return (nil, (zipInfo, zipId))
             } else {
                 let zipId = try zipInfo.cachedZip.get().listable.getIdForPath(
                     path: ZipPath(path: zipInfo.subpath))
+                guard case .dir(_) = zipId else {
+                    throw fs_errorForPOSIXError(POSIXError.ENOTDIR)
+                }
                 return (children, (zipInfo, zipId))
             }
         case .dirPortal(_, let children):
@@ -549,7 +556,7 @@ public final class FileSystem: Sendable {
         let nodeData = getNodeByFileId(fileID)
 
         guard let zipId = nodeData.zipId else {
-            throw fs_errorForPOSIXError(POSIXError.EIO)
+            throw fs_errorForPOSIXError(POSIXError.ENOENT)
         }
         guard case .zip(let zipInfo, _) = nodeData.rootNode.node else {
             throw fs_errorForPOSIXError(POSIXError.EIO)
@@ -563,7 +570,7 @@ public final class FileSystem: Sendable {
             return try listableZip.readData(index: entryInd, offset: offset, length: length, buffer: buffer)
             
         case .dir(_):
-            throw fs_errorForPOSIXError(POSIXError.EIO)
+            throw fs_errorForPOSIXError(POSIXError.EISDIR)
         }
     }
 
