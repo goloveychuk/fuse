@@ -399,7 +399,7 @@ func main() throws {
                     .birthTime,
                 ]), of: ino.toId())
             var st = stat.toStat()
-            fuse_reply_attr(req.value, &st, 1.0)
+            fuse_reply_attr(req.value, &st, TIMEOUT)
         }
     }
     operations.readdirplus = { (req, ino, size, off, fi) in
