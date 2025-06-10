@@ -328,11 +328,11 @@ class ListableZip : PublicZip {
                 continue
             }
             guard case .dir(let listingId) = currentId else {
-                throw ZipError.invalidListing("Invalid path, not dir")
+                throw fs_errorForPOSIXError(POSIXError.ENOTDIR)
             }
             let list = listings[Int(listingId)]
             guard let childId = list[part.filename] else {
-                throw ZipError.invalidListing("Invalid path, cannot found child \(part)")
+                throw fs_errorForPOSIXError(POSIXError.ENOENT)
             }
             currentId = childId
         }
