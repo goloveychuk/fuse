@@ -1,1 +1,0 @@
-touch /tmp/TestVol/asd6 && ln -s /tmp/TestVol/asd6 /tmp/TestVol/fdfd

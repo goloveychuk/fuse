@@ -31,7 +31,7 @@ final class WritableZip: PublicZip, Sendable {
     let detached = ThreadSafeSet<UInt>()
     let listableZip: ListableZip
     let detachedDir: URL
-    init(config: WritableConfig, fileURL: URL) throws {
+    init(config: WritableConfig, fileURL: URL) async throws {
         self.config = config
         self.detachedDir = URL(fileURLWithPath: config.mutationsPath).appendingPathComponent(
             absolutePathToDirname(fileURL))
@@ -42,7 +42,7 @@ final class WritableZip: PublicZip, Sendable {
                 detached.insert(UInt(file.lastPathComponent)!)
             }
         }
-        self.listableZip = try ListableZip(fileURL: fileURL)
+        self.listableZip = try await ListableZip(fileURL: fileURL)
     }
     
     var listable: ListableZip {
