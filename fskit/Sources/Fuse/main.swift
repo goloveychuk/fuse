@@ -226,7 +226,7 @@ extension FSItem.Attributes {
         //todo all stats
         st.st_ino = ino_t(self.fileID.rawValue)
         st.st_mode = self.mode
-        st.st_nlink = self.linkCount
+        st.st_nlink = nlink_t(self.linkCount)
         st.st_size = Int(self.size)
         return st
     }
