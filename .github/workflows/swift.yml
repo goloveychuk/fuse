@@ -19,6 +19,7 @@ jobs:
     - run: 
         sudo apt install libfuse3-dev fuse3
 
+
     - name: Build
       run: swift build -v
       working-directory: "fskit"
