@@ -18,7 +18,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - run: 
+    - run: |
         sudo apt install libfuse3-dev fuse3
         swift sdk install https://download.swift.org/swift-6.1-release/static-sdk/swift-6.1-RELEASE/swift-6.1-RELEASE_static-linux-0.0.1.artifactbundle.tar.gz 
 
