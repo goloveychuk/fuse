@@ -1,6 +1,5 @@
 import FSKit
 import Foundation
-import Glibc
 import clibfuse
 import common
 
@@ -261,7 +260,7 @@ class PlusPacker: FSDirectoryEntryPacker {
             //todo should I send all attrs?
             attr = FSItem.Attributes()
             attr.fileID = itemID 
-            attr.mode = UInt32(Glibc.S_IFDIR | 0o755)
+            attr.mode = UInt32(S_IFDIR | 0o755)
             attr.linkCount = 2
             attr.size = 0
         } else {
