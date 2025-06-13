@@ -53,9 +53,9 @@ jobs:
       # run: swift build --swift-sdk x86_64-swift-linux-musl
       run: swift build --static-swift-stdlib -c release
       working-directory: "fskit"
-    - name: Compress
-      run: upx -9 .build/release/Fuse
-      working-directory: "fskit"
+    # - name: Compress
+    #   run: upx -9 .build/release/Fuse
+    #   working-directory: "fskit"
 
     - name: upload
       uses: actions/upload-artifact@v4
