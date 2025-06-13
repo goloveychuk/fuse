@@ -71,7 +71,9 @@ jobs:
     
     - name: Build
       # run: swift build --swift-sdk x86_64-swift-linux-musl
-      run: swift build --static-swift-stdlib -c release
+      run: |
+        swift -version
+        swift build --static-swift-stdlib -c release
       working-directory: "fskit"
     # - name: Compress //gzip compression is better
     #   run: upx -9 .build/release/Fuse
