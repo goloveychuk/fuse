@@ -18,6 +18,10 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - name: Install dependencies
+      run: |
+        sudo apt install meson ninja-build
+        sudo snap install upx
     - name: Build libfuse
       working-directory: "fskit"
       run: |
@@ -30,7 +34,16 @@ jobs:
 
     - name: Build
       # run: swift build --swift-sdk x86_64-swift-linux-musl
-      run: swift build --static-swift-stdlib
+      run: swift build --static-swift-stdlib -c release
       working-directory: "fskit"
+    - name: Compress
+      run: upx -9 .build/release/Fuse
+
+    - name: upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: fskit
+        path: .build/release/Fuse
+
     # - name: Run tests
     #   run: swift test -v
