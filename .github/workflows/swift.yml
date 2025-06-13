@@ -29,14 +29,14 @@ jobs:
 
     - name: Install dependencies
       run: |
-        sudo apt install meson ninja-build libcurl4-openssl-dev python3-lldb-13
+        sudo apt install meson ninja-build libcurl4-openssl-dev python3-lldb-13 pkg-config
 
     - name: Install Swift
       run: |
         curl -O https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz
         tar zxf swiftly-$(uname -m).tar.gz
         ./swiftly init --quiet-shell-followup
-        . "${SWIFTLY_HOME_DIR:-~/.local/share/swiftly}/env.sh"
+        . ~/.local/share/swiftly/env.sh
         hash -r
         swiftly install
 
