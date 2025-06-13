@@ -26,6 +26,11 @@ jobs:
     #   with:
     #     swift-version: 6
 
+
+    - name: Install dependencies
+      run: |
+        sudo apt install meson ninja-build libcurl4-openssl-dev python3-lldb-13
+
     - name: Install Swift
       run: |
         curl -O https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz
@@ -33,12 +38,8 @@ jobs:
         ./swiftly init --quiet-shell-followup
         . "${SWIFTLY_HOME_DIR:-~/.local/share/swiftly}/env.sh"
         hash -r
-        swiftly install 6.1.2
-        swiftly use 6.1.2
+        swiftly install
 
-    - name: Install dependencies
-      run: |
-        sudo apt install meson ninja-build
     - name: Install upx
       run: |
         ARCH=$(uname -m)
