@@ -11,10 +11,11 @@ on:
 
 jobs:
   build:
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-20.04-arm]
 
-    # runs-on: ubuntu-latest
-    runs-on: ubuntu-22.04
-
+    runs-on: ${{ matrix.os }}
 
     steps:
     - uses: actions/checkout@v4
@@ -53,14 +54,14 @@ jobs:
       # run: swift build --swift-sdk x86_64-swift-linux-musl
       run: swift build --static-swift-stdlib -c release
       working-directory: "fskit"
-    # - name: Compress
-    #   run: upx -9 .build/release/Fuse
-    #   working-directory: "fskit"
+    - name: Compress
+      run: upx -9 .build/release/Fuse
+      working-directory: "fskit"
 
     - name: upload
       uses: actions/upload-artifact@v4
       with:
-        name: fskit
+        name: fskit-${{ matrix.arch }}
         path: fskit/.build/release/Fuse
 
     # - name: Run tests
