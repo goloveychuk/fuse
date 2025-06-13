@@ -50,13 +50,17 @@ jobs:
         ./build_libfuse.sh
 
 
+    - uses: swift-actions/setup-swift@65540b95f51493d65f5e59e97dcef9629ddf11bf
+      # with:
+      #   swift-version: 6.1.2
+
     - name: Build
       # run: swift build --swift-sdk x86_64-swift-linux-musl
       run: swift build --static-swift-stdlib -c release
       working-directory: "fskit"
-    - name: Compress
-      run: upx -9 .build/release/Fuse
-      working-directory: "fskit"
+    # - name: Compress //gzip compression is better
+    #   run: upx -9 .build/release/Fuse
+    #   working-directory: "fskit"
 
     - name: upload
       uses: actions/upload-artifact@v4
