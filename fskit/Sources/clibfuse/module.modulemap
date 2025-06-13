@@ -1,3 +1,4 @@
 module clibfuse {
-    umbrella header "clibfuse.h"
-}
+    umbrella header "shim.h"
+    export *
+} 

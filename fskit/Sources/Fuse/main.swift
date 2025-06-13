@@ -1,6 +1,5 @@
 import FSKit
 import Foundation
-import Glibc
 import clibfuse
 import common
 
@@ -226,7 +225,7 @@ extension FSItem.Attributes {
         //todo all stats
         st.st_ino = ino_t(self.fileID.rawValue)
         st.st_mode = self.mode
-        st.st_nlink = self.linkCount
+        st.st_nlink = __nlink_t(self.linkCount)
         st.st_size = Int(self.size)
         return st
     }
@@ -261,7 +260,7 @@ class PlusPacker: FSDirectoryEntryPacker {
             //todo should I send all attrs?
             attr = FSItem.Attributes()
             attr.fileID = itemID 
-            attr.mode = UInt32(Glibc.S_IFDIR | 0o755)
+            attr.mode = UInt32(clibfuse.S_IFDIR | 0o755)
             attr.linkCount = 2
             attr.size = 0
         } else {
@@ -547,7 +546,7 @@ func main() throws {
     var args_struct = fuse_args(argc: Int32(args.count), argv: &cArgs, allocated: 0)
 
     // Create session
-    let session = fuse_session_new(
+    let session = fuse_session_new_fn(
         &args_struct, &operations, MemoryLayout<fuse_lowlevel_ops>.size, nil)
     guard session != nil else {
         throw NSError(
@@ -583,17 +582,17 @@ func main() throws {
     let clone_fd: UInt32 = 1  //whether to use separate device fds for each thread (may increase performance)
     fuse_daemonize(foreground)
     var ret: Int32 = 0
-    if multithreaded {
-        let config = fuse_loop_cfg_create()
-        fuse_loop_cfg_set_clone_fd(config, clone_fd)
-        fuse_loop_cfg_set_max_threads(config, max_threads)
-        // fuse_loop_cfg_set_idle_threads
-        ret = fuse_session_loop_mt_32(session, config)
-        fuse_loop_cfg_destroy(config)
+    // if multithreaded {
+    //     let config = fuse_loop_cfg_create()
+    //     fuse_loop_cfg_set_clone_fd(config, clone_fd)
+    //     fuse_loop_cfg_set_max_threads(config, max_threads)
+    //     // fuse_loop_cfg_set_idle_threads
+    //     ret = fuse_session_loop_mt_32(session, config)
+    //     fuse_loop_cfg_destroy(config)
 
-    } else {
+    // } else {
         ret = fuse_session_loop(session)
-    }
+    // }
 
     for arg in cArgs where arg != nil {
         free(arg)

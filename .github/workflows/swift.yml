@@ -1,0 +1,99 @@
+# This workflow will build a Swift project
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-swift
+
+name: Swift
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-22.04-arm] # debian 11
+        include:
+          - os: ubuntu-22.04
+            arch: x86_64
+          - os: ubuntu-22.04-arm
+            arch: arm64
+
+    runs-on: ${{ matrix.os }}
+
+    container:
+      image: swift:6.1.2-focal
+      options: --privileged
+      
+    steps:
+    - uses: actions/checkout@v4
+
+    # - uses: redsun82/setup-swift@b2b6f77ab14f6a9b136b520dc53ec8eca27d2b99
+    #   with:
+    #     swift-version: 6
+
+
+    - name: Install dependencies
+      run: |
+        apt update
+        apt install -y meson ninja-build curl sudo
+        # ibcurl4-openssl-dev python3-lldb-13 pkg-config
+
+    # - name: Install Swift
+    #   run: |
+    #     curl -O https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz
+    #     tar zxf swiftly-$(uname -m).tar.gz
+    #     ./swiftly init --quiet-shell-followup
+    #     . ~/.local/share/swiftly/env.sh
+    #     hash -r
+    #     swiftly install
+
+    # - name: Install upx
+    #   run: |
+    #     ARCH=$(uname -m)
+    #     if [ "$ARCH" = "x86_64" ]; then
+    #       UPX_ARCH="amd64_linux"
+    #     elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+    #       UPX_ARCH="arm64_linux"
+    #     else
+    #       echo "Unsupported architecture: $ARCH"
+    #       exit 1
+    #     fi
+        
+    #     echo "Using UPX architecture: $UPX_ARCH"
+    #     wget https://github.com/upx/upx/releases/download/v5.0.1/upx-5.0.1-${UPX_ARCH}.tar.xz
+    #     tar -xf upx-5.0.1-${UPX_ARCH}.tar.xz
+    #     cp upx-5.0.1-${UPX_ARCH}/upx /usr/local/bin/
+    #     chmod +x /usr/local/bin/upx
+        
+    - name: Build libfuse
+      working-directory: "fskit"
+      run: |
+        # apt install libfuse3-dev fuse3
+
+        # swift sdk install https://download.swift.org/swift-6.1.2-release/static-sdk/swift-6.1.2-RELEASE/swift-6.1.2-RELEASE_static-linux-0.0.1.artifactbundle.tar.gz --checksum df0b40b9b582598e7e3d70c82ab503fd6fbfdff71fd17e7f1ab37115a0665b3b
+        sudo apt install -y meson ninja-build
+        ./build_libfuse.sh
+
+
+    
+    - name: Build
+      # run: swift build --swift-sdk x86_64-swift-linux-musl
+      run: |
+        # . ~/.local/share/swiftly/env.sh
+        swift -version
+        swift build --static-swift-stdlib -c release
+      working-directory: "fskit"
+    # - name: Compress //gzip compression is better
+    #   run: upx -9 .build/release/Fuse
+    #   working-directory: "fskit"
+
+    - name: upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: fskit-${{ matrix.arch }}
+        path: fskit/.build/release/Fuse
+
+    # - name: Run tests
+    #   run: swift test -v
