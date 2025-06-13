@@ -21,7 +21,24 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt install meson ninja-build
-        sudo snap install upx
+    - name: Install upx
+      run: |
+        ARCH=$(uname -m)
+        if [ "$ARCH" = "x86_64" ]; then
+          UPX_ARCH="amd64_linux"
+        elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+          UPX_ARCH="arm64_linux"
+        else
+          echo "Unsupported architecture: $ARCH"
+          exit 1
+        fi
+        
+        echo "Using UPX architecture: $UPX_ARCH"
+        wget https://github.com/upx/upx/releases/download/v5.0.1/upx-5.0.1-${UPX_ARCH}.tar.xz
+        tar -xf upx-5.0.1-${UPX_ARCH}.tar.xz
+        sudo cp upx-5.0.1-${UPX_ARCH}/upx /usr/local/bin/
+        sudo chmod +x /usr/local/bin/upx
+        
     - name: Build libfuse
       working-directory: "fskit"
       run: |
