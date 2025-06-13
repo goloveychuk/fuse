@@ -72,6 +72,7 @@ jobs:
     - name: Build
       # run: swift build --swift-sdk x86_64-swift-linux-musl
       run: |
+        . ~/.local/share/swiftly/env.sh
         swift -version
         swift build --static-swift-stdlib -c release
       working-directory: "fskit"
