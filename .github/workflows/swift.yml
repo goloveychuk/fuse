@@ -37,7 +37,7 @@ jobs:
     - name: Install dependencies
       run: |
         apt update
-        apt install -y meson ninja-build curl
+        apt install -y meson ninja-build curl sudo
         # ibcurl4-openssl-dev python3-lldb-13 pkg-config
 
     # - name: Install Swift
@@ -73,7 +73,7 @@ jobs:
         # apt install libfuse3-dev fuse3
 
         # swift sdk install https://download.swift.org/swift-6.1.2-release/static-sdk/swift-6.1.2-RELEASE/swift-6.1.2-RELEASE_static-linux-0.0.1.artifactbundle.tar.gz --checksum df0b40b9b582598e7e3d70c82ab503fd6fbfdff71fd17e7f1ab37115a0665b3b
-        apt install -y meson ninja-build
+        sudo apt install -y meson ninja-build
         ./build_libfuse.sh
 
 
