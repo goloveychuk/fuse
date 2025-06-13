@@ -22,9 +22,14 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - uses: redsun82/setup-swift@b2b6f77ab14f6a9b136b520dc53ec8eca27d2b99
-      with:
-        swift-version: 6
+    # - uses: redsun82/setup-swift@b2b6f77ab14f6a9b136b520dc53ec8eca27d2b99
+    #   with:
+    #     swift-version: 6
+
+    - name: Install Swift
+      run: |
+        swiftly install 6.1.2
+        swiftly use 6.1.2
 
     - name: Install dependencies
       run: |
