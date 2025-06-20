@@ -216,7 +216,7 @@ class Context {
 }
 
 let context = Context()
-let TIMEOUT = 10_000_000.0
+let TIMEOUT = DBL_MAX
 
 extension FSItem.Attributes {
     func toStat() -> stat {
@@ -542,11 +542,9 @@ func main() throws {
         // "-d",  // Debug output
         "-o",
         "default_permissions,auto_unmount", //io_uring
-        // auto_unmount",
-        // "-o", "ro",
         // "-o",
         // mountPoint,
-    ]
+    ] + (mutationsPath == nil ? ["-o", "ro"] : [])
 
     // Convert to C-style args
     var cArgs: [UnsafeMutablePointer<Int8>?] = args.map { strdup($0) }
