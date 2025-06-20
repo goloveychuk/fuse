@@ -1,1 +1,1 @@
-swift build --static-swift-stdlib
+swift build --static-swift-stdlib -c release

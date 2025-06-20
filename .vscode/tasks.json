@@ -1,28 +1,28 @@
 {
 	"version": "2.0.0",
 	"tasks": [
-		{
-			"type": "npm",
-			"script": "run build",
-			"group": "build",
-			"problemMatcher": [],
-			"label": "npm: build",
-			"detail": "builder build plugin --no-minify --source-map"
-		},
-		{
-			"type": "swift",
-			"args": [
-				"build",
-				"--static-swift-stdlib"
-			],
-			"env": {},
-			"cwd": "/workspaces/FSKitSample/fskit",
-			"disableTaskQueue": true,
-			"dontTriggerTestDiscovery": true,
-			"group": "build",
-			"problemMatcher": [],
-			"label": "swift: Build Debug Fuse",
-			"detail": "swift build"
-		}
+		// {
+		// 	"type": "npm",
+		// 	"script": "run build",
+		// 	"group": "build",
+		// 	"problemMatcher": [],
+		// 	"label": "npm: build",
+		// 	"detail": "builder build plugin --no-minify --source-map"
+		// },
+		// {
+		// 	"type": "swift",
+		// 	"args": [
+		// 		"build",
+		// 		"--static-swift-stdlib"
+		// 	],
+		// 	"env": {},
+		// 	"cwd": "/workspaces/FSKitSample/fskit",
+		// 	"disableTaskQueue": true,
+		// 	"dontTriggerTestDiscovery": true,
+		// 	"group": "build",
+		// 	"problemMatcher": [],
+		// 	"label": "swift: Build Debug Fuse",
+		// 	"detail": "swift build"
+		// }
 	]
 }

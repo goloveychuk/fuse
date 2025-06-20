@@ -1,0 +1,11 @@
+was
+
+real    4m29.043s
+user    2m36.009s
+sys     0m43.037s
+
+real fs
+
+real    6m14.375s
+user    2m53.301s
+sys     0m47.414s

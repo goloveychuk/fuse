@@ -1,5 +1,18 @@
-umount /workspaces/FSKitSample/fskit/test
+#!/bin/bash
 
-./.build/debug/Fuse -m /workspaces/FSKitSample/example/.yarn/fuse-state.json -u /tmp/fuse-mount3-changes /workspaces/FSKitSample/fskit/test
+# Get the directory where the script is located
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 
-umount /workspaces/FSKitSample/fskit/test
+# Ensure the mount point exists
+mkdir -p "$SCRIPT_DIR/test"
+
+# Unmount if already mounted
+umount "$SCRIPT_DIR/test" 2>/dev/null || true
+
+# Mount using relative paths
+# -u "/tmp/fuse-mount3-changes"
+"$REPO_ROOT/fskit/.build/release/Fuse" -m "$REPO_ROOT/example/.yarn/fuse-state.json" "/tmp/asd"
+
+# Unmount when done
+umount "$SCRIPT_DIR/test"
