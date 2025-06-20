@@ -321,6 +321,20 @@ func main() throws {
             return
         }
     }
+    Task.detached {
+        while true {
+            try await Task.sleep(for: .seconds(1))
+            // Read process memory from /proc/self/statm and convert from pages to MB
+            if let statm = try? String(contentsOfFile: "/proc/self/statm") {
+                let components = statm.split(separator: " ")
+                if components.count > 1, let rss = Double(components[1]) {
+                    let pageSize = Double(getpagesize())
+                    let memoryMB = (rss * pageSize) / (1024 * 1024)
+                    print("used memory: \(String(format: "%.2f", memoryMB)) MB")
+                }
+            }
+        }
+    }
     print("CommandLine.arguments: \(CommandLine.arguments)")
     // Prepare arguments
     let args =
@@ -392,6 +406,7 @@ func main() throws {
     for arg in cArgs where arg != nil {
         free(arg)
     }
+    
     exit(ret)
 
     // print("FUSE filesystem exited with status: \(result)")
