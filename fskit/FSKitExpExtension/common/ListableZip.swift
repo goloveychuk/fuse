@@ -372,18 +372,17 @@ final class ListableZip : PublicZip, Sendable {
             throw fs_errorForPOSIXError(POSIXError.EIO) //todo
         }
         let zipEntry = getEntry(index: index)
+            if offset >= zipEntry.size {
+                return 0
+            }
             switch zipEntry.compressionMethod {
             case .deflate:
+                // todo optimize this
                 let compressedData = try rawReadAllDataIntoBuffer(
                     index: index)
 
                 // Create a temporary buffer for decompressed data
                 let destinationSize = Int(zipEntry.size)
-
-                // If offset is beyond the file size, return 0 bytes read
-                if offset >= destinationSize {
-                    return 0
-                }
 
                 let decompressedData = try decompressDeflate(
                     compressedData: compressedData, destinationSize: destinationSize)
@@ -409,11 +408,9 @@ final class ListableZip : PublicZip, Sendable {
                         length: length,
                         bufferPointer: rawBuffer,
                     )
-                    if bytesRead > 0 {  //todo think
-                        return bytesRead
-                    } else {
-                        throw fs_errorForPOSIXError(POSIXError.EIO)
-                    }
+                    // we can return smaller number of bytes read if eof
+                    // https://github.com/erofs/erofs-utils/blob/d963a5103c858ca8ec6360c8eaff8c083a643a4b/fuse/main.c#L386
+                    return bytesRead
                 }
             }
     }
@@ -437,6 +434,17 @@ final class ListableZip : PublicZip, Sendable {
     )  throws -> Int {
         let entry = getEntry(index: index)
 
+        // Validate offset
+        if offset < 0 {
+            return 0
+        }
+
+        // Calculate how many bytes to read based on offset, length, and compressed size
+        let bytesToRead = min(length, Int(entry.compressedSize) - offset)
+        if bytesToRead <= 0 {
+            return 0
+        }
+        
         // Open the file where the zip is stored
         let fileHandle = try FileHandle(forReadingFrom: fileURL)
         defer {
@@ -460,16 +468,7 @@ final class ListableZip : PublicZip, Sendable {
         // Calculate offset to compressed data
         let dataOffset = entry.localHeaderOffset + 30 + UInt32(nameLength) + UInt32(extraLength)
 
-        // Validate offset
-        if offset < 0 || offset >= entry.compressedSize {
-            return 0
-        }
 
-        // Calculate how many bytes to read based on offset, length, and compressed size
-        let bytesToRead = min(length, Int(entry.compressedSize) - offset)
-        if bytesToRead <= 0 {
-            return 0
-        }
 
         // Make sure the buffer has enough space
         // let bufferCapacity = min(bytesToRead, bufferPointer.count)

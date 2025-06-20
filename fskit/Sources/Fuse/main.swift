@@ -284,11 +284,9 @@ class PlusPacker: FSDirectoryEntryPacker {
             }
         }
         if entrySize > remaining {
-            // todo do_forget() because I got ino
-            // Entry doesn't fit, stop here
             return false
         }
-        // data.advanced(by: 2)
+
         bufused += entrySize
         return true
     }
