@@ -55,8 +55,9 @@ interface DependencyData {
   isWorkspace: boolean;
   target: PortablePath | null;
   packageLocation: PortablePath;
+  locator: Locator;
   dependenciesLocation: PortablePath | null;
-  dependenciesLinks?: Map<PortablePath, { relative: PortablePath, absolute: PortablePath }>;
+  dependenciesLinks?: Map<PortablePath, { locator: Locator, relative: PortablePath, absolute: PortablePath }>;
 }
 export type FuseCustomData = {
   locatorByPath: Map<PortablePath, string>;
@@ -156,7 +157,7 @@ class FuseInstaller implements Installer {
     this.indexFolderPromise = setupCopyIndex(xfs, {
       indexPath: ppath.join(opts.project.configuration.get(`globalFolder`), `index`),
     });
-    this.fuseIsSupported = true;
+    this.fuseIsSupported = process.env.FUSE === 'true';
   }
 
   private customData: FuseCustomData = {
@@ -170,6 +171,7 @@ class FuseInstaller implements Installer {
   }
 
   async installPackage(pkg: Package, fetchResult: FetchResult, api: InstallPackageExtraApi) {
+    // console.log('installPackage', structUtils.stringifyLocator(pkg));
     switch (pkg.linkType) {
       case LinkType.SOFT: return this.installPackageSoft(pkg, fetchResult, api);
       case LinkType.HARD: return this.installPackageHard(pkg, fetchResult, api);
@@ -178,7 +180,7 @@ class FuseInstaller implements Installer {
     throw new Error(`Assertion failed: Unsupported package link type`);
   }
 
-  async installPackageSoft(pkg: Package, fetchResult: FetchResult, api: InstallPackageExtraApi) {
+  private async installPackageSoft(pkg: Package, fetchResult: FetchResult, api: InstallPackageExtraApi) {
     const packageLocation = ppath.resolve(fetchResult.packageFs.getRealPath(), fetchResult.prefixPath);
 
     const isWorkspace = this.opts.project.tryWorkspaceByLocator(pkg) !== null;
@@ -191,6 +193,7 @@ class FuseInstaller implements Installer {
       dependenciesLocation,
       isWorkspace,
       target: null,
+      locator: pkg,
     });
 
     return {
@@ -199,7 +202,7 @@ class FuseInstaller implements Installer {
     };
   }
 
-  async installPackageHard(pkg: Package, fetchResult: FetchResult, api: InstallPackageExtraApi) {
+  private async installPackageHard(pkg: Package, fetchResult: FetchResult, api: InstallPackageExtraApi) {
     const isVirtual = structUtils.isVirtualLocator(pkg);
     const devirtualizedLocator: Locator = isVirtual ? structUtils.devirtualizeLocator(pkg) : pkg;
 
@@ -225,6 +228,7 @@ class FuseInstaller implements Installer {
     this.customData.allDependencies.set(pkg.locatorHash, {
       ...packagePaths,
       isWorkspace: false,
+      locator: pkg,
       target: xfs.existsSync(realPath) ? ppath.join(realPath, fetchResult.prefixPath) : null // for conditional dependencies
     });
 
@@ -249,6 +253,48 @@ class FuseInstaller implements Installer {
       packageLocation,
       buildRequest,
     };
+  }
+
+  private getAllHoistedDependencies() {
+      const visited = new Set<LocatorHash>()
+
+      // const toVisit = [this.opts.project.topLevelWorkspace.anchoredLocator.locatorHash]
+      const toVisit = [...this.opts.project.workspaces.map(w => w.anchoredLocator.locatorHash)]
+
+      const hoisted = new Map<string, DependencyData>()
+
+      while (toVisit.length) {
+        const current = toVisit.pop()!
+        if (visited.has(current)) {
+          continue
+        }
+        visited.add(current)
+
+        const data = this.customData.allDependencies.get(current) //probably disabled
+        if (!data) {
+          continue
+        }
+        const dependencyName = structUtils.stringifyIdent(data.locator)
+        if (hoisted.has(dependencyName)) { //we skip deps here, sure?
+          continue
+        }
+        if (!data.isWorkspace ) {
+          hoisted.set(dependencyName, data)
+        }
+
+        // console.log('current', this.customData.allDependencies)
+        if (data.dependenciesLinks) {
+          for (const dep of data.dependenciesLinks.values()) {
+              if (visited.has(dep.locator.locatorHash)) {
+                continue
+              }
+              // const depName = structUtils.stringifyIdent(dep.locator)
+              toVisit.push(dep.locator.locatorHash)
+          }
+        }
+      }
+      // console.log('hoisted', [...hoisted.keys()])
+      return hoisted
   }
 
   async attachInternalDependencies(locator: Locator, dependencies: Array<[Descriptor, Locator]>) {
@@ -289,7 +335,7 @@ class FuseInstaller implements Installer {
 
       const depLinkPath = ppath.relative(ppath.dirname(depDstPath), depSrcPaths.packageLocation);
 
-      dependencyData.dependenciesLinks!.set(name, { relative: depLinkPath, absolute: depSrcPaths.packageLocation });
+      dependencyData.dependenciesLinks!.set(name, { relative: depLinkPath, absolute: depSrcPaths.packageLocation, locator: targetDependency });
     }
 
     let hasExplicitSelfDependency = false;
@@ -391,11 +437,15 @@ class FuseInstaller implements Installer {
   }
 
   async finalizeInstall() {
-
     const fuseData: FuseNode = {
       children: {},
       linkType: 'HARD',
     }
+    // console.time('hoisted')
+    // const hoisted = this.getAllHoistedDependencies()
+    // console.timeEnd('hoisted')
+    // console.log('count', [...hoisted.keys()].length)
+    // console.log('hoisted', [...hoisted.keys()])
 
     const defaultFsLayer = new VirtualFS({
       baseFs: new ZipOpenFS({
