@@ -460,65 +460,61 @@ final class ListableZip : PublicZip, Sendable {
         index: UInt, offset: Int, length: Int, bufferPointer: UnsafeMutableRawBufferPointer
     )  throws -> Int {
         let entry = getEntry(index: index)
-
-        // Open the file where the zip is stored
-        let fileHandle = try FileHandle(forReadingFrom: fileURL)
-        defer {
-            try? fileHandle.close()
+        
+        // Memory map the file
+        let mappedData = try Data(contentsOf: fileURL, options: .mappedRead)
+        
+        return try mappedData.withUnsafeBytes { rawBuffer in
+            let buffer = rawBuffer.bindMemory(to: UInt8.self)
+            
+            // Read local header (first 30 bytes)
+            let localHeaderOffset = Int(entry.localHeaderOffset)
+            if localHeaderOffset + 30 > mappedData.count {
+                throw ZipError.invalidZipFile("Could not read local header")
+            }
+            
+            // Get pointer to the local header
+            let localHeaderPtr = buffer.baseAddress!.advanced(by: localHeaderOffset)
+            
+            // Parse header fields directly from memory
+            let nameLength = localHeaderPtr.advanced(by: 26).withMemoryRebound(to: UInt16.self, capacity: 1) {
+                $0.pointee.littleEndian
+            }
+            
+            let extraLength = localHeaderPtr.advanced(by: 28).withMemoryRebound(to: UInt16.self, capacity: 1) {
+                $0.pointee.littleEndian
+            }
+    
+            // Calculate offset to compressed data
+            let dataOffset = entry.localHeaderOffset + 30 + UInt32(nameLength) + UInt32(extraLength)
+    
+            // Validate offset
+            if offset < 0 || offset >= entry.compressedSize {
+                return 0
+            }
+    
+            // Calculate how many bytes to read based on offset, length, and compressed size
+            let bytesToRead = min(length, Int(entry.compressedSize) - offset)
+            if bytesToRead <= 0 {
+                return 0
+            }
+            
+            // Calculate the exact position of data in the file
+            let startPos = Int(dataOffset) + offset
+            
+            // Make sure we're not reading beyond the file
+            if startPos + bytesToRead > mappedData.count {
+                throw ZipError.invalidZipFile("Attempt to read beyond end of file")
+            }
+            
+            // Get direct pointer to the data in memory
+            let dataPtr = buffer.baseAddress!.advanced(by: startPos)
+            
+            // Copy data directly from memory-mapped file to output buffer
+            memcpy(bufferPointer.baseAddress!, dataPtr, bytesToRead)
+            
+            return bytesToRead
         }
-
-        // Read local header
-        try fileHandle.seek(toOffset: UInt64(entry.localHeaderOffset))
-        guard let localHeaderBuf = try fileHandle.read(upToCount: 30) else {
-            throw ZipError.invalidZipFile("Could not read local header")
-        }
-
-        if localHeaderBuf.count < 30 {
-            throw ZipError.invalidZipFile("Incomplete local header")
-        }
-
-        // Parse header fields
-        let nameLength = localHeaderBuf.loadLittleEndian(26, as: UInt16.self)
-        let extraLength = localHeaderBuf.loadLittleEndian(28, as: UInt16.self)
-
-        // Calculate offset to compressed data
-        let dataOffset = entry.localHeaderOffset + 30 + UInt32(nameLength) + UInt32(extraLength)
-
-        // Validate offset
-        if offset < 0 || offset >= entry.compressedSize {
-            return 0
-        }
-
-        // Calculate how many bytes to read based on offset, length, and compressed size
-        let bytesToRead = min(length, Int(entry.compressedSize) - offset)
-        if bytesToRead <= 0 {
-            return 0
-        }
-
-        // Make sure the buffer has enough space
-        // let bufferCapacity = min(bytesToRead, bufferPointer.count)
-        // if bufferCapacity <= 0 {
-        //     return 0
-        // }
-
-        // Seek to the correct position (data offset + requested offset)
-        try fileHandle.seek(toOffset: UInt64(dataOffset) + UInt64(offset))
-
-        let bytesRead = read(
-            fileHandle.fileDescriptor,
-            bufferPointer.baseAddress!,
-            bytesToRead)
-
-        return bytesRead
-        // // Read directly into the provided buffer
-        // guard let readData = try fileHandle.read(upToCount: bufferCapacity) else {
-        //     return 0
-        // }
-
-        // // Copy read data to the buffer
-        // readData.copyBytes(to: bufferPointer)
-        // return readData.count
-
     }
 
     func getParentForZipID(zipID: ZipID) -> ZipID? { //nil returned for root node
@@ -591,183 +587,228 @@ final class ListableZip : PublicZip, Sendable {
     }
 
     static func readZipEntries(fileURL: URL) async throws -> [ZipEntry] {
-        let fileHandle = try FileHandle(forReadingFrom: fileURL)
-        defer {
-            try? fileHandle.close()
-        }
-        // Get file size using stat on the file descriptor
-        var statInfo = stat()
-        if fstat(fileHandle.fileDescriptor, &statInfo) != 0 {
-            throw ZipError.invalidZipFile("Could not determine file size")
-        }
-        let fileSize = UInt64(statInfo.st_size)
-
-        if fileSize < UInt64(noCommentCDSize) {
+        // Memory map the entire file
+        let mappedData = try Data(contentsOf: fileURL, options: .mappedRead)
+        let fileSize = mappedData.count
+        
+        if fileSize < noCommentCDSize {
             throw ZipError.invalidZipFile("EOCD not found")
         }
 
         var eocdOffset: Int = -1
+        var eocdBaseOffset: Int = 0
 
-        // Fast read if no comment
-        try fileHandle.seek(toOffset: fileSize - UInt64(noCommentCDSize))
-        var eocdBuffer = try fileHandle.read(upToCount: noCommentCDSize) ?? Data()
-
-        if eocdBuffer.count == noCommentCDSize {
-            let signature = eocdBuffer.loadLittleEndian(0, as: UInt32.self)
-            if signature == END_OF_CENTRAL_DIRECTORY {
-                eocdOffset = 0
-            }
-        }
-
-        // If not found, do a more extensive search
-        if eocdOffset == -1 {
-            let bufferSize = min(65557, Int(fileSize))
-            try fileHandle.seek(toOffset: UInt64(max(0, Int(fileSize) - bufferSize)))
-            eocdBuffer = try fileHandle.read(upToCount: bufferSize) ?? Data()
-
-            // Find EOCD signature
-            for i in stride(from: eocdBuffer.count - 4, through: 0, by: -1) {
-                let signature = eocdBuffer.loadLittleEndian(i, as: UInt32.self)
+        return try mappedData.withUnsafeBytes { rawBuffer in
+            let buffer = rawBuffer.bindMemory(to: UInt8.self)
+            
+            // Fast read if no comment
+            let eocdStartOffset = fileSize - noCommentCDSize
+            
+            if eocdStartOffset >= 0 {
+                let signature = buffer.baseAddress!.advanced(by: eocdStartOffset).withMemoryRebound(to: UInt32.self, capacity: 1) { 
+                    return $0.pointee.littleEndian
+                }
+                
                 if signature == END_OF_CENTRAL_DIRECTORY {
-                    eocdOffset = i
-                    break
+                    eocdOffset = 0
+                    eocdBaseOffset = eocdStartOffset
                 }
             }
-
+    
+            // If not found, do a more extensive search
             if eocdOffset == -1 {
-                throw ZipError.invalidZipFile("Not a zip archive")
+                let bufferSize = min(65557, fileSize)
+                let searchStartOffset = max(0, fileSize - bufferSize)
+                
+                // Find EOCD signature
+                for i in stride(from: fileSize - 4, through: searchStartOffset, by: -1) {
+                    let signature = buffer.baseAddress!.advanced(by: i).withMemoryRebound(to: UInt32.self, capacity: 1) {
+                        return $0.pointee.littleEndian
+                    }
+                    
+                    if signature == END_OF_CENTRAL_DIRECTORY {
+                        eocdOffset = 0
+                        eocdBaseOffset = i
+                        break
+                    }
+                }
+    
+                if eocdOffset == -1 {
+                    throw ZipError.invalidZipFile("Not a zip archive")
+                }
             }
-        }
+    
+            // Parse EOCD fields
+            let eocdPtr = buffer.baseAddress!.advanced(by: eocdBaseOffset)
+            let totalEntries = eocdPtr.advanced(by: 10).withMemoryRebound(to: UInt16.self, capacity: 1) { 
+                $0.pointee.littleEndian
+            }
+            
+            let centralDirSize = eocdPtr.advanced(by: 12).withMemoryRebound(to: UInt32.self, capacity: 1) { 
+                $0.pointee.littleEndian
+            }
+            
+            let centralDirOffset = eocdPtr.advanced(by: 16).withMemoryRebound(to: UInt32.self, capacity: 1) { 
+                $0.pointee.littleEndian
+            }
+            
+            let commentLength = eocdPtr.advanced(by: 20).withMemoryRebound(to: UInt16.self, capacity: 1) { 
+                $0.pointee.littleEndian
+            }
+    
+            // Consistency checks
+            if eocdOffset + Int(commentLength) + noCommentCDSize > (fileSize - eocdBaseOffset) {
+                throw ZipError.zipArchiveInconsistent
+            }
+    
+            if totalEntries == 0xffff || centralDirSize == 0xffff_ffff
+                || centralDirOffset == 0xffff_ffff
+            {
+                throw ZipError.unsupportedZipFeature("Zip 64 is not supported")
+            }
+    
+            if centralDirSize > UInt32(fileSize) {
+                throw ZipError.zipArchiveInconsistent
+            }
+    
+            if UInt32(totalEntries) > centralDirSize / 46 {
+                throw ZipError.zipArchiveInconsistent
+            }
+    
+            // Verify central directory boundaries
+            let cdEndOffset = Int(centralDirOffset) + Int(centralDirSize)
+            if cdEndOffset > fileSize {
+                throw ZipError.zipArchiveInconsistent
+            }
+            
+            // Create pointer to central directory
+            let cdPtr = buffer.baseAddress!.advanced(by: Int(centralDirOffset))
 
-        // Parse EOCD fields
-        let totalEntries = eocdBuffer.loadLittleEndian(eocdOffset + 10, as: UInt16.self)
-        let centralDirSize = eocdBuffer.loadLittleEndian(eocdOffset + 12, as: UInt32.self)
-        let centralDirOffset = eocdBuffer.loadLittleEndian(eocdOffset + 16, as: UInt32.self)
-        let commentLength = eocdBuffer.loadLittleEndian(eocdOffset + 20, as: UInt16.self)
+            var entries: [ZipEntry] = []
+            entries.reserveCapacity(Int(totalEntries))
+            var offset = 0
+            var index = 0
+            var sumCompressedSize: UInt32 = 0
+            // return entries
+            while index < totalEntries {
+                if offset + 46 > Int(centralDirSize) {
+                    throw ZipError.zipArchiveInconsistent
+                }
+                
+                // Get pointer to current entry
+                let entryPtr = cdPtr.advanced(by: offset)
+                
+                // Read entry header fields directly from memory
+                let signature = entryPtr.withMemoryRebound(to: UInt32.self, capacity: 1) {
+                    $0.pointee.littleEndian
+                }
+                
+                if signature != CENTRAL_DIRECTORY {
+                    throw ZipError.zipArchiveInconsistent
+                }
 
-        // Consistency checks
-        if eocdOffset + Int(commentLength) + noCommentCDSize > eocdBuffer.count {
-            throw ZipError.zipArchiveInconsistent
-        }
+                let versionMadeBy = entryPtr.advanced(by: 4).withMemoryRebound(to: UInt16.self, capacity: 1) {
+                    $0.pointee.littleEndian
+                }
+                let os = UInt8(versionMadeBy >> 8)
 
-        if totalEntries == 0xffff || centralDirSize == 0xffff_ffff
-            || centralDirOffset == 0xffff_ffff
-        {
-            throw ZipError.unsupportedZipFeature("Zip 64 is not supported")
-        }
+                let flags = entryPtr.advanced(by: 8).withMemoryRebound(to: UInt16.self, capacity: 1) {
+                    $0.pointee.littleEndian
+                }
+                if (flags & 0x0001) != 0 {
+                    throw ZipError.unsupportedZipFeature("Encrypted zip files are not supported")
+                }
 
-        if centralDirSize > UInt32(fileSize) {
-            throw ZipError.zipArchiveInconsistent
-        }
+                let compressionMethodValue = entryPtr.advanced(by: 10).withMemoryRebound(to: UInt16.self, capacity: 1) {
+                    $0.pointee.littleEndian
+                }
+                let compressionMethod = CompressionMethod(rawValue: compressionMethodValue)
+                guard let compressionMethod = compressionMethod else {
+                    throw ZipError.invalidZipFile("Not supported zip compression")
+                }
+                
+                let crc = entryPtr.advanced(by: 16).withMemoryRebound(to: UInt32.self, capacity: 1) {
+                    $0.pointee.littleEndian
+                }
+                
+                let compressedSize = entryPtr.advanced(by: 20).withMemoryRebound(to: UInt32.self, capacity: 1) {
+                    $0.pointee.littleEndian
+                }
+                
+                let size = entryPtr.advanced(by: 24).withMemoryRebound(to: UInt32.self, capacity: 1) {
+                    $0.pointee.littleEndian
+                }
+                
+                let nameLength = entryPtr.advanced(by: 28).withMemoryRebound(to: UInt16.self, capacity: 1) {
+                    $0.pointee.littleEndian
+                }
+                
+                let extraLength = entryPtr.advanced(by: 30).withMemoryRebound(to: UInt16.self, capacity: 1) {
+                    $0.pointee.littleEndian
+                }
+                
+                let commentLength = entryPtr.advanced(by: 32).withMemoryRebound(to: UInt16.self, capacity: 1) {
+                    $0.pointee.littleEndian
+                }
+                
+                let externalAttributes = entryPtr.advanced(by: 38).withMemoryRebound(to: UInt32.self, capacity: 1) {
+                    $0.pointee.littleEndian
+                }
+                
+                let localHeaderOffset = entryPtr.advanced(by: 42).withMemoryRebound(to: UInt32.self, capacity: 1) {
+                    $0.pointee.littleEndian
+                }
 
-        if UInt32(totalEntries) > centralDirSize / 46 {
-            throw ZipError.zipArchiveInconsistent
-        }
+                // Extract name directly from memory without copying
+                var nameData = Data()
+                if nameLength > 0 {
+                    // We need to copy the name data since we can't hold raw pointers beyond this function
+                    let namePtr = entryPtr.advanced(by: 46)
+                    nameData = Data(bytes: namePtr, count: Int(nameLength))
+                }
 
-        // Read central directory
-        try fileHandle.seek(toOffset: UInt64(centralDirOffset))
-        let cdBuffer = try fileHandle.read(upToCount: Int(centralDirSize)) ?? Data()
+                // 31                    16 15            0
+                // +----------------------+---------------+
+                // | Unix file mode bits  |  MS-DOS attrs |
+                // +----------------------+---------------+
+                //      (high 16 bits)      (low 16 bits)
 
-        if cdBuffer.count != Int(centralDirSize) {
-            throw ZipError.zipArchiveInconsistent
-        }
+                let linuxAttributes = mode_t(externalAttributes >> 16)
 
-        var entries: [ZipEntry] = []
-        var offset = 0
-        var index = 0
-        var sumCompressedSize: UInt32 = 0
-        return entries
-        while index < totalEntries {
-            if offset + 46 > cdBuffer.count {
+                let isSymbolicLink =
+                    os == ZIP_UNIX && (linuxAttributes & S_IFMT) == S_IFLNK
+
+                entries.append(
+                    ZipEntry(
+                        name: nameData,
+                        compressionMethod: compressionMethod,
+                        size: size,
+                        os: os,
+                        isSymbolicLink: isSymbolicLink,
+                        crc: crc,
+                        compressedSize: compressedSize,
+                        linuxAttributes: linuxAttributes,
+                        mtime: SAFE_TIME,
+                        localHeaderOffset: localHeaderOffset
+                    ))
+
+                sumCompressedSize += compressedSize
+
+                index += 1
+                offset += 46 + Int(nameLength) + Int(extraLength) + Int(commentLength)
+            }
+
+            // Check for archive bombs
+            if sumCompressedSize > UInt32(fileSize) {
                 throw ZipError.zipArchiveInconsistent
             }
 
-            let signature = cdBuffer.loadLittleEndian(offset, as: UInt32.self)
-            if signature != CENTRAL_DIRECTORY {
+            if offset != Int(centralDirSize) {
                 throw ZipError.zipArchiveInconsistent
             }
 
-            let versionMadeBy = cdBuffer.loadLittleEndian(offset + 4, as: UInt16.self)
-            let os = UInt8(versionMadeBy >> 8)
-
-            let flags = cdBuffer.loadLittleEndian(offset + 8, as: UInt16.self)
-            if (flags & 0x0001) != 0 {
-                throw ZipError.unsupportedZipFeature("Encrypted zip files are not supported")
-            }
-
-            let compressionMethod = CompressionMethod(
-                rawValue: cdBuffer.loadLittleEndian(offset + 10, as: UInt16.self))
-            guard let compressionMethod = compressionMethod else {
-                throw ZipError.invalidZipFile("Not supported zip compression")
-            }
-            let crc = cdBuffer.loadLittleEndian(offset + 16, as: UInt32.self)
-            let compressedSize = cdBuffer.loadLittleEndian(offset + 20, as: UInt32.self)
-            let size = cdBuffer.loadLittleEndian(offset + 24, as: UInt32.self)
-            let nameLength = cdBuffer.loadLittleEndian(offset + 28, as: UInt16.self)
-            let extraLength = cdBuffer.loadLittleEndian(offset + 30, as: UInt16.self)
-            let commentLength = cdBuffer.loadLittleEndian(offset + 32, as: UInt16.self)
-            let externalAttributes = cdBuffer.loadLittleEndian(offset + 38, as: UInt32.self)
-            let localHeaderOffset = cdBuffer.loadLittleEndian(offset + 42, as: UInt32.self)
-
-            // Extract name
-            let nameData = cdBuffer.subdata(in: (offset + 46)..<(offset + 46 + Int(nameLength)))
-            //todo check for \0???
-            // guard
-            //     let name = String(data: nameData, encoding: .utf8)?.replacingOccurrences(
-            //         of: "\0", with: " ")
-            // else {
-            //     throw ZipError.invalidZipFile("Invalid ZIP file")
-            // }
-
-            // if name.contains("\0") {
-            //     throw ZipError.invalidZipFile("Invalid ZIP file")
-            // }
-
-            // 31                    16 15            0
-            // +----------------------+---------------+
-            // | Unix file mode bits  |  MS-DOS attrs |
-            // +----------------------+---------------+
-            //      (high 16 bits)      (low 16 bits)
-
-            let linuxAttributes = mode_t(externalAttributes >> 16) //todo check if linux
-
-            let isSymbolicLink =
-                os == ZIP_UNIX && (linuxAttributes & S_IFMT) == S_IFLNK  //todo check UInt16()
-
-            //todo check
-            // let isDir =
-            //     os == ZIP_UNIX && ((UInt16(externalAttributes >> 16)) & S_IFMT) == S_IFDIR  //todo check UInt16()
-
-            entries.append(
-                ZipEntry(
-                    name: nameData,
-                    compressionMethod: compressionMethod,
-                    size: size,
-                    os: os,
-                    isSymbolicLink: isSymbolicLink,
-                    crc: crc,
-                    compressedSize: compressedSize,
-                    linuxAttributes: linuxAttributes,
-                    mtime: SAFE_TIME,
-                    localHeaderOffset: localHeaderOffset
-                ))
-
-            sumCompressedSize += compressedSize
-
-            index += 1
-            offset += 46 + Int(nameLength) + Int(extraLength) + Int(commentLength)
+            return entries
         }
-
-        // Check for archive bombs
-        if sumCompressedSize > UInt32(fileSize) {
-            throw ZipError.zipArchiveInconsistent
-        }
-
-        if offset != cdBuffer.count {
-            throw ZipError.zipArchiveInconsistent
-        }
-
-        return entries
     }
 }
 
