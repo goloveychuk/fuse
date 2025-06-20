@@ -339,7 +339,11 @@ func main() throws {
     // operations.open =  ?
     // operations.flush =  ?
     // operations.release =  ?
-
+    operations.opendir = { (req, ino, fi) in
+        fi!.pointee.cache_readdir = 1
+        fi!.pointee.keep_cache = 1
+        fuse_reply_open(req, fi);
+    }
     operations.lookup = { (req, parent, name) in
         let req = SendableAnything(req)
         let fs = context.fileSystem!
