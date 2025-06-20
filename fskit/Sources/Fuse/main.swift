@@ -348,9 +348,10 @@ func main() throws {
 
         Task.detached {
 
-            print("lookup: parent=\(parent), name=\(name)")
+            // print("lookup: parent=\(parent), name=\(name)")
 
             do {
+                // todo negative lookpu entry (ino=0)
                 let item = try await fs.lookupItem(
                     FSFileName(string: name), inDirectory: parent.toId())
 
@@ -375,7 +376,7 @@ func main() throws {
         let fs = context.fileSystem!
 
         Task.detached {
-            print("readlink: ino=\(ino)")
+            // print("readlink: ino=\(ino)")
             // Handle symbolic links
             do {
                 let linkFileName = try await fs.readSymbolicLink(ino.toId())
@@ -393,7 +394,7 @@ func main() throws {
 
         Task.detached {
 
-            print("getattr: ino=\(ino)")
+            // print("getattr: ino=\(ino)")
 
             // Define a dummy stat structure
             let stat = try await fs.getAttributes(
@@ -410,7 +411,7 @@ func main() throws {
     let fs = context.fileSystem!
     
     Task.detached {
-        print("read: ino=\(ino), size=\(size), offset=\(offset)")
+        // print("read: ino=\(ino), size=\(size), offset=\(offset)")
         let buffer = DataBufferWrapper(capacity: Int(size))
         do {
 
@@ -457,7 +458,7 @@ func main() throws {
         Task.detached {
             let packer = PlusPacker(req: req.value, bufSize: size)
 
-            print("readdirplus: starting enumeration")
+            // print("readdirplus: starting enumeration")
             do {
                 // sleep(10)
                 // try await Task.sleep(for: .seconds(1))
@@ -469,8 +470,11 @@ func main() throws {
                     packer: packer
                 )
                 let buf = packer.getBuf()
-
-                print("readdirplus: replied with \(buf.used) bytes")
+                // readdirplus: starting enumeration
+                // readdirplus: replied with 656 bytes
+                // readdirplus: starting enumeration
+                // readdirplus: replied with 0 bytes
+                // print("readdirplus: replied with \(buf.used) bytes") // many times returns 0 bytes 
                 _ = buf.data.withUnsafeBytes { rawBuffer in
                     fuse_reply_buf(req.value, rawBuffer.baseAddress, buf.used)
                 }
@@ -531,9 +535,12 @@ func main() throws {
     let args = [
         CommandLine.arguments[0],
         // "-f",  // Run in foreground
-        "-d",  // Debug output
+        // "-d",  // Debug output
         "-o",
-        "default_permissions"
+        "default_permissions,auto_unmount", //io_uring
+        // auto_unmount",
+        // "-o", "ro",
+        // "-o",
         // mountPoint,
     ]
 
