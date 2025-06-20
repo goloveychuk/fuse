@@ -3,213 +3,7 @@ import Foundation
 import clibfuse
 import common
 
-// MARK: - Low-level FUSE Operations
 
-// let ll_init: @convention(c) (UnsafeMutablePointer<fuse_conn_info>?, UnsafeMutablePointer<fuse_config>?) -> UnsafeMutableRawPointer? = { conn, cfg in
-//     print("Filesystem initialized")
-
-//     if let cfg = cfg {
-//         cfg.pointee.kernel_cache = 1
-//     }
-
-//     return Unmanaged.passRetained(FilesystemState.shared).toOpaque()
-// }
-
-// let ll_destroy: @convention(c) (UnsafeMutableRawPointer?) -> Void = { userdata in
-//     print("Filesystem destroyed")
-
-//     if let userdata = userdata {
-//         Unmanaged<FilesystemState>.fromOpaque(userdata).release()
-//     }
-// }
-
-// let ll_lookup: @convention(c) (fuse_ino_t, UnsafePointer<Int8>?, UnsafeMutablePointer<fuse_entry_param>?) -> Void = { parent, name, entry_param in
-//     guard let name = name, let entry_param = entry_param else { return }
-
-//     let nameStr = String(cString: name)
-//     print("lookup: parent=\(parent), name=\(nameStr)")
-
-//     // Clear entry param
-//     memset(entry_param, 0, MemoryLayout<fuse_entry_param>.size)
-
-//     // Get parent node
-//     guard let parentNode = FilesystemState.shared.getNode(inode: UInt64(parent)) else {
-//         entry_param.pointee.ino = 0
-//         return
-//     }
-
-//     // Handle special cases
-//     if nameStr == "." {
-//         entry_param.pointee.ino = fuse_ino_t(parentNode.inode)
-//         parentNode.fillStat(&entry_param.pointee.attr)
-//         entry_param.pointee.attr_timeout = 1.0
-//         entry_param.pointee.entry_timeout = 1.0
-//         // Increase ref count
-//         _ = Unmanaged<FsNode>.fromOpaque(UnsafeRawPointer(bitPattern: Int(parentNode.inode))!).retain()
-//         return
-//     }
-
-//     if nameStr == ".." {
-//         let parentIno = parentNode.parent
-//         entry_param.pointee.ino = fuse_ino_t(parentIno)
-//         if let grandparentNode = FilesystemState.shared.getNode(inode: parentIno) {
-//             grandparentNode.fillStat(&entry_param.pointee.attr)
-//             // Increase ref count
-//             if let ptr = UnsafeRawPointer(bitPattern: Int(parentIno)) {
-//                 _ = Unmanaged<FsNode>.fromOpaque(ptr).retain()
-//             }
-//         }
-//         entry_param.pointee.attr_timeout = 1.0
-//         entry_param.pointee.entry_timeout = 1.0
-//         return
-//     }
-
-//     // Look for the requested node
-//     for (_, childNode) in parentNode.children {
-//         if childNode.name == nameStr {
-//             entry_param.pointee.ino = fuse_ino_t(childNode.inode)
-//             childNode.fillStat(&entry_param.pointee.attr)
-//             entry_param.pointee.attr_timeout = 1.0
-//             entry_param.pointee.entry_timeout = 1.0
-//             // Increase ref count for the found node
-//             _ = Unmanaged<FsNode>.fromOpaque(UnsafeRawPointer(bitPattern: Int(childNode.inode))!).retain()
-//             return
-//         }
-//     }
-
-//     // Not found
-// //     entry_param.pointee.ino = 0
-// // }
-
-// let ll_getattr: @convention(c) (fuse_ino_t, UnsafeMutablePointer<stat>?, UnsafeMutablePointer<fuse_file_info>?) -> Int32 = { ino, stbuf, fi in
-//     guard let stbuf = stbuf else { return -EINVAL }
-
-//     print("getattr: ino=\(ino)")
-
-//     guard let node = FilesystemState.shared.getNode(inode: UInt64(ino)) else {
-//         return -ENOENT
-//     }
-
-//     node.fillStat(stbuf)
-//     return 0
-// }
-
-// let ll_readdir: @convention(c) (fuse_ino_t, size_t, off_t, UnsafeMutablePointer<fuse_file_info>?,
-//                                fuse_readdir_callback?, UnsafeMutableRawPointer?) -> Int32 = { ino, size, off, fi, filler, buf in
-//     print("readdir: ino=\(ino), offset=\(off)")
-
-//     guard let node = FilesystemState.shared.getNode(inode: UInt64(ino)),
-//           node.type == .directory,
-//           let filler = filler,
-//           let buf = buf else {
-//         return -ENOENT
-//     }
-
-//     var offset: off_t = 0
-
-//     // Skip entries based on offset
-//     if offset >= off {
-//         var stat_buf = stat()
-//         node.fillStat(&stat_buf)
-//         if filler(buf, ".", &stat_buf, offset + 1, 0) != 0 {
-//             return 0
-//         }
-//     }
-//     offset += 1
-
-//     if offset >= off {
-//         var stat_buf = stat()
-//         if let parentNode = FilesystemState.shared.getNode(inode: node.parent) {
-//             parentNode.fillStat(&stat_buf)
-//         }
-//         if filler(buf, "..", &stat_buf, offset + 1, 0) != 0 {
-//             return 0
-//         }
-//     }
-//     offset += 1
-
-//     // List children
-//     for (_, childNode) in node.children {
-//         if offset >= off {
-//             var stat_buf = stat()
-//             childNode.fillStat(&stat_buf)
-//             if filler(buf, childNode.name, &stat_buf, offset + 1, 0) != 0 {
-//                 return 0
-//             }
-//         }
-//         offset += 1
-//     }
-
-//     return 0
-// }
-
-// let ll_forget: @convention(c) (fuse_ino_t, UInt64) -> Void = { ino, nlookup in
-//     print("forget: ino=\(ino), nlookup=\(nlookup)")
-
-//     // Skip root inode and other special cases
-//     if ino == FUSE_ROOT_ID || ino <= 1 {
-//         return
-//     }
-
-//     let ptr = UnsafeRawPointer(bitPattern: Int(ino))
-//     guard let ptr = ptr else { return }
-
-//     // Release the node nlookup times
-//     for _ in 0..<nlookup {
-//         Unmanaged<FsNode>.fromOpaque(ptr).release()
-//     }
-
-//     // Remove from cache if needed
-//     FilesystemState.shared.nodeCache.removeValue(forKey: UInt64(ino))
-// }
-
-// let ll_open: @convention(c) (fuse_ino_t, UnsafeMutablePointer<fuse_file_info>?) -> Int32 = { ino, fi in
-//     guard let node = FilesystemState.shared.getNode(inode: UInt64(ino)) else {
-//         return -ENOENT
-//     }
-
-//     if node.type == .directory {
-//         return -EISDIR
-//     }
-
-//     if let fi = fi {
-//         fi.pointee.fh = UInt64(ino)
-//     }
-
-//     return 0
-// }
-
-// let ll_read: @convention(c) (fuse_ino_t, size_t, off_t, UnsafeMutablePointer<fuse_file_info>?, UnsafeMutablePointer<Int8>?, size_t) -> Int32 = { ino, size, off, fi, buf, bufsize in
-//     guard let node = FilesystemState.shared.getNode(inode: UInt64(ino)),
-//           node.type == .file,
-//           let buf = buf else {
-//         return -ENOENT
-//     }
-
-//     let content = node.content ?? Data()
-//     let contentSize = content.count
-
-//     if off >= contentSize {
-//         return 0
-//     }
-
-//     let readSize = min(Int(size), contentSize - Int(off))
-//     content.withUnsafeBytes { rawBuffer in
-//         let sourcePtr = rawBuffer.baseAddress!.advanced(by: Int(off))
-//         memcpy(buf, sourcePtr, readSize)
-//     }
-
-//     return Int32(readSize)
-// }
-
-// MARK: - Main Function
-
-// class LLFS {
-//     let lala = "asd"
-//     var readdirplus: (@convention(c) (fuse_req_t?, fuse_ino_t, Int, off_t, UnsafeMutablePointer<fuse_file_info>?) -> Void)! = { (req, ino, idk, offset, fileInfo) in
-//         // self.lal
-//     }
-// }
 
 class Context {
     var fileSystem: FileSystem!
@@ -240,7 +34,7 @@ class PlusPacker: FSDirectoryEntryPacker {
     init(req: fuse_req_t?, bufSize: Int) {
         allBufSize = bufSize
         self.req = req
-        data = Data(capacity: Int(bufSize)) //todo change to data
+        data = Data(capacity: Int(bufSize))  //todo change to data
     }
 
     func packEntry(
@@ -259,7 +53,7 @@ class PlusPacker: FSDirectoryEntryPacker {
         if name == "." || name == ".." {
             //todo should I send all attrs?
             attr = FSItem.Attributes()
-            attr.fileID = itemID 
+            attr.fileID = itemID
             attr.mode = UInt32(clibfuse.S_IFDIR | 0o755)
             attr.linkCount = 2
             attr.size = 0
@@ -275,11 +69,10 @@ class PlusPacker: FSDirectoryEntryPacker {
             entry_timeout: TIMEOUT
         )
 
-
         let entrySize = name.withCString { cName in
             data.withUnsafeMutableBytes { allBuf in
                 fuse_add_direntry_plus(
-                   req, allBuf.baseAddress!.advanced(by: bufused), remaining, cName, &entry,
+                    req, allBuf.baseAddress!.advanced(by: bufused), remaining, cName, &entry,
                     Int(nextCookie.rawValue))
             }
         }
@@ -332,17 +125,16 @@ func main() throws {
     // Initialize operations structure
     var operations = fuse_lowlevel_ops()
     // operations.init = ll_init
-    // operations.destroy = 
-    // operations.setattr = 
-    // operations.read =  
-    // operations.write =  
+    // operations.destroy =
+    // operations.setattr =
+    // operations.write =
     // operations.open =  ?
     // operations.flush =  ?
     // operations.release =  ?
     operations.opendir = { (req, ino, fi) in
         fi!.pointee.cache_readdir = 1
         fi!.pointee.keep_cache = 1
-        fuse_reply_open(req, fi);
+        fuse_reply_open(req, fi)
     }
     operations.lookup = { (req, parent, name) in
         let req = SendableAnything(req)
@@ -411,47 +203,47 @@ func main() throws {
         }
     }
     operations.read = { (req, ino, size, offset, fi) in
-    let req = SendableAnything(req)
-    let fs = context.fileSystem!
-    
-    Task.detached {
-        // print("read: ino=\(ino), size=\(size), offset=\(offset)")
-        let buffer = DataBufferWrapper(capacity: Int(size))
-        do {
+        let req = SendableAnything(req)
+        let fs = context.fileSystem!
 
-            let written = try await fs.readData(
-                ino.toId(), 
-                offset: offset,
-                length: size,
-                into: buffer,
-            )
+        Task.detached {
+            // print("read: ino=\(ino), size=\(size), offset=\(offset)")
+            let buffer = DataBufferWrapper(capacity: Int(size))
+            do {
 
-            _ = buffer.withUnsafeMutableBytes { rawBuffer in
-                fuse_reply_buf(req.value, rawBuffer.baseAddress!, written)
+                let written = try await fs.readData(
+                    ino.toId(),
+                    offset: offset,
+                    length: size,
+                    into: buffer,
+                )
+
+                _ = buffer.withUnsafeMutableBytes { rawBuffer in
+                    fuse_reply_buf(req.value, rawBuffer.baseAddress!, written)
+                }
+
+                // // Use zero-copy reply when possible
+                // if let mappedData = fileData.zeroCopyData {
+                //     // Option 1: Zero-copy using fuse_buf with FUSE_BUF_IS_FD flag
+                //     var buf = fuse_bufvec(count: 1, idx: 0, off: 0, buf: [
+                //         fuse_buf(
+                //             size: mappedData.size,
+                //             flags: UInt32(FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK),
+                //             fd: mappedData.fd,
+                //             pos: mappedData.position
+                //         )
+                //     ])
+                //     fuse_reply_data(req.value, &buf, UInt32(FUSE_BUF_COPY_FLAGS))
+                // } else {
+                //     // Option 2: Standard reply for when zero-copy isn't possible
+                //     // Use the regular data buffer
+
+                // }
+            } catch {
+                reply_err(req.value, error)
             }
-
-            // // Use zero-copy reply when possible
-            // if let mappedData = fileData.zeroCopyData {
-            //     // Option 1: Zero-copy using fuse_buf with FUSE_BUF_IS_FD flag
-            //     var buf = fuse_bufvec(count: 1, idx: 0, off: 0, buf: [
-            //         fuse_buf(
-            //             size: mappedData.size,
-            //             flags: UInt32(FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK),
-            //             fd: mappedData.fd,
-            //             pos: mappedData.position
-            //         )
-            //     ])
-            //     fuse_reply_data(req.value, &buf, UInt32(FUSE_BUF_COPY_FLAGS))
-            // } else {
-            //     // Option 2: Standard reply for when zero-copy isn't possible
-            //     // Use the regular data buffer
-                
-            // }
-        } catch {
-            reply_err(req.value, error)
         }
     }
-}
 
     operations.readdirplus = { (req, ino, size, off, fi) in
         let req = SendableAnything(req)
@@ -478,11 +270,11 @@ func main() throws {
                 // readdirplus: replied with 656 bytes
                 // readdirplus: starting enumeration
                 // readdirplus: replied with 0 bytes
-                // print("readdirplus: replied with \(buf.used) bytes") // many times returns 0 bytes 
+                // print("readdirplus: replied with \(buf.used) bytes") // many times returns 0 bytes
                 _ = buf.data.withUnsafeBytes { rawBuffer in
                     fuse_reply_buf(req.value, rawBuffer.baseAddress, buf.used)
                 }
-                
+
             } catch {
                 reply_err(req.value, error)
             }
@@ -490,11 +282,6 @@ func main() throws {
         }
         // }
     }
-
-    // operations.readdir = ll_readdir
-    // operations.forget = ll_forget
-    // operations.open = ll_open
-    // operations.read = ll_read
 
     // Mount point
     var mountPoint: String? = nil
@@ -536,15 +323,16 @@ func main() throws {
     }
     print("CommandLine.arguments: \(CommandLine.arguments)")
     // Prepare arguments
-    let args = [
-        CommandLine.arguments[0],
-        // "-f",  // Run in foreground
-        // "-d",  // Debug output
-        "-o",
-        "default_permissions,auto_unmount", //io_uring
-        // "-o",
-        // mountPoint,
-    ] + (mutationsPath == nil ? ["-o", "ro"] : [])
+    let args =
+        [
+            CommandLine.arguments[0],
+            // "-f",  // Run in foreground
+            // "-d",  // Debug output
+            "-o",
+            "default_permissions,auto_unmount",  //io_uring
+            // "-o",
+            // mountPoint,
+        ] + (mutationsPath == nil ? ["-o", "ro"] : [])
 
     // Convert to C-style args
     var cArgs: [UnsafeMutablePointer<Int8>?] = args.map { strdup($0) }
@@ -598,7 +386,7 @@ func main() throws {
     //     fuse_loop_cfg_destroy(config)
 
     // } else {
-        ret = fuse_session_loop(session)
+    ret = fuse_session_loop(session)
     // }
 
     for arg in cArgs where arg != nil {
