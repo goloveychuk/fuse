@@ -49,17 +49,17 @@ class PlusPacker: FSDirectoryEntryPacker {
             // todo warn
             return true
         }
-        let attr: FSItem.Attributes
-        if name == "." || name == ".." {
-            //todo should I send all attrs?
-            attr = FSItem.Attributes()
-            attr.fileID = itemID
-            attr.mode = UInt32(clibfuse.S_IFDIR | 0o755)
-            attr.linkCount = 2
-            attr.size = 0
-        } else {
-            attr = attributes!
-        }
+        let attr = attributes!
+        // if name == "." || name == ".." {
+        //     //todo should I send all attrs?
+        //     attr = FSItem.Attributes()
+        //     attr.fileID = itemID
+        //     attr.mode = UInt32(clibfuse.S_IFDIR | 0o755)
+        //     attr.linkCount = 2
+        //     attr.size = 0
+        // } else {
+            // attr = attributes!
+        // }
 
         var entry = fuse_entry_param(
             ino: itemID.toFuseIno(),

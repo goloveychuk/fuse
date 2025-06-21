@@ -409,6 +409,19 @@ public final class FileSystem: Sendable {
         return zipEntries
     }
 
+    private func createDotDotAttributes(itemID: FSItem.Identifier) -> FSItem.Attributes {
+        //todo impl correctly
+        let attr = FSItem.Attributes()
+        attr.fileID = itemID
+        attr.uid = uid
+        attr.gid = gid
+        attr.linkCount = 2
+        attr.type = .directory
+        attr.mode = UInt32(S_IFDIR | 0o755)
+        attr.size = 0
+        return attr
+    }
+
     public func enumerateDirectory(
         directory: FSItem.Identifier,
         startingAt cookie: FSDirectoryCookie,
@@ -426,12 +439,14 @@ public final class FileSystem: Sendable {
             guard
                 packer.packEntry(
                     name: FSFileName(string: "."), itemType: .directory, itemID: directory,
-                    nextCookie: FSDirectoryCookie(currentOffset + 1), attributes: nil)
+                    nextCookie: FSDirectoryCookie(currentOffset + 1), 
+                    attributes: req != nil ? createDotDotAttributes(itemID: directory) : nil  // I don't think it's needed, check
+                    )
             else {
                 return FSDirectoryVerifier(version)
             }
-            currentOffset += 1
         }
+        currentOffset += 1
 
         if cookie.rawValue <= currentOffset {
             let attributes = try await getAttributesForNodeData(
@@ -440,13 +455,13 @@ public final class FileSystem: Sendable {
                 packer.packEntry(
                     name: FSFileName(string: ".."), itemType: .directory,
                     itemID: attributes.parentID, nextCookie: FSDirectoryCookie(currentOffset + 1),
-                    attributes: nil  // I don't think it's needed, check
+                    attributes: req != nil ? createDotDotAttributes(itemID: attributes.parentID) : nil  // I don't think it's needed, check
                 )
             else {
                 return FSDirectoryVerifier(version)
             }
-            currentOffset += 1
         }
+        currentOffset += 1
 
         let childrenData = try await getChildrenData(nodeData: nodeData)
 
