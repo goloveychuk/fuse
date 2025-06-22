@@ -147,7 +147,6 @@ func main() throws {
             // print("lookup: parent=\(parent), name=\(name)")
 
             do {
-                // todo negative lookpu entry (ino=0)
                 let item = try await fs.lookupItem(
                     FSFileName(string: name), inDirectory: parent.toId())
 
@@ -163,7 +162,19 @@ func main() throws {
 
                 fuse_reply_entry(req.value, &entry)
             } catch {
-                reply_err(req.value, error)  //todo err
+                if error is POSIXErrorCode && error.rawValue == ENOENT {
+                    // for negative lookup cache
+                    var entry = fuse_entry_param(
+                        ino: 0,
+                        generation: 0,
+                        attr: stat(),
+                        attr_timeout: TIMEOUT,
+                        entry_timeout: TIMEOUT
+                    )
+                    fuse_reply_entry(req.value, &entry)
+                } else {
+                    reply_err(req.value, error)
+                }
             }
         }
     }
