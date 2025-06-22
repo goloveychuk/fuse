@@ -7,58 +7,75 @@ enum ZipError: Error {
     case invalidListing(String)
 }
 
-struct Indexed<T: Sendable>: Sendable {
-    typealias Key = FSFileName
+// extension Data: Comparable {
+//     public static func < (lhs: Data, rhs: Data) -> Bool {
+//         return lhs.lexicographicallyPrecedes(rhs)
+//     }
+// }
 
-    private var items: [Data: T] = [:]
+struct Indexed<T: Sendable>: Sendable {
+    typealias Key = Data
+
+    private var entries: [(Key, T)]
 
     init() {
-        self.items = [:]
+        //todo optimizae for 30 count
+        self.entries = []
     }
 
-    func entries() -> [(Key, T)] {
-        return items.lazy.map { (FSFileName(data: $0.key), $0.value) } //todo ceheck lazy
+    func getListing() ->  [(Key, T)] {
+        return entries
     }
 
-    // private func findIndex(for key: Key) -> Int? {
-    //     var low = 0
-    //     var high = items.count - 1
-
-    //     while low <= high {
-    //         let mid = (low + high) / 2
-    //         let midKey = items[mid].0
-
-    //         if midKey == key {
-    //             return mid
-    //         } else if midKey < key {
-    //             low = mid + 1
-    //         } else {
-    //             high = mid - 1
-    //         }
-    //     }
-
-    //     return nil
+    // func entries() -> [(Key, T)] {
+    //     return items.lazy.map { (FSFileName(data: $0.key), $0.value) } //todo ceheck lazy
     // }
 
-    // private func insertionPoint(for key: Key) -> Int {
-    //     var low = 0
-    //     var high = items.count - 1
+    func findIndexInSorted(key: Key) -> Int? {
+        var low = 0
+        var high = entries.count - 1
+        while low <= high {
+            let mid = (low + high) / 2
+            if entries[mid].0 == key {
+                return mid
+            } else if entries[mid].0.lexicographicallyPrecedes(key) {
+                low = mid + 1
+            } else {
+                high = mid - 1
+            }
+        }
+        return nil
+    }
 
-    //     while low <= high {
-    //         let mid = (low + high) / 2
 
-    //         if items[mid].0 < key {
-    //             low = mid + 1
-    //         } else {
-    //             high = mid - 1
-    //         }
-    //     }
+    private func insertionPoint(for key: Key) -> Int {
+        var low = 0
+        var high = entries.count - 1
+        // fast path for sorted inserts
+        if ( entries.count > 0 && entries[high].0.lexicographicallyPrecedes(key)) {
+            return high + 1
+        }
+        let debug = entries.map { String(data: $0.0, encoding: .utf8) }
+        print(debug)
 
-    //     return low
-    // }
+        while low <= high {
+            let mid = (low + high) / 2
+
+            if entries[mid].0.lexicographicallyPrecedes(key) {
+                low = mid + 1
+            } else {
+                high = mid - 1
+            }
+        }
+
+        return low
+    }
 
     subscript(index: Key) -> T? {
-        return items[index.data]
+        if let foundIndex = findIndexInSorted(key: index) {
+            return entries[foundIndex].1
+        }
+        return nil
         // if let foundIndex = findIndex(for: index) {
         //     return items[foundIndex].1
         // }
@@ -67,21 +84,13 @@ struct Indexed<T: Sendable>: Sendable {
 
     subscript(index: Key) -> T {
         get {
-            return items[index.data]!
-
-            // if let foundIndex = findIndex(for: index) {
-            //     return items[foundIndex].1
-            // }
-            // fatalError("Index not found")
+            let foundIndex = findIndexInSorted(key: index)!
+            return entries[foundIndex].1
         }
         set(newValue) {
-            items[index.data] = newValue
-            // if let existingIndex = findIndex(for: index) {
-            //     items[existingIndex] = (index, newValue)
-            // } else {
-            //     let insertAt = insertionPoint(for: index)
-            //     items.insert((index, newValue), at: insertAt)
-            // }
+            //todo check for dublicates
+            let insertAt = insertionPoint(for: index)
+            entries.insert((index, newValue), at: insertAt)
         }
     }
 }
@@ -220,9 +229,7 @@ extension ZipPath {
     func isDir() -> Bool {
         return self.last == ZipPath.slash
     }
-    var filename: FSFileName {
-        return FSFileName(data: self)
-    }
+
 }
 
 extension String {
@@ -331,7 +338,7 @@ final class ListableZip : PublicZip, Sendable {
                 throw fs_errorForPOSIXError(POSIXError.ENOTDIR)
             }
             let list = listings[Int(listingId)]
-            guard let childId = list[part.filename] else {
+            guard let childId = list[part] else {
                 throw fs_errorForPOSIXError(POSIXError.ENOENT)
             }
             currentId = childId
@@ -527,7 +534,7 @@ final class ListableZip : PublicZip, Sendable {
             guard let parentId = nameToIndMap[parent] else {
                 throw ZipError.invalidListing("Parent directory not found")
             }
-            listings[parentId][childName.filename] = childID
+            listings[parentId][childName] = childID
             parentMapping[childID] = parentId
         }
 

@@ -19,5 +19,8 @@ struct OrderedDictionary<Key: StringProtocol & Sendable, Value: Sendable> {
             return dict[key]
         }
     }
-    
+
+    func getListing() -> [(Key, Value)] {
+        return sortedEntries
+    }
 }

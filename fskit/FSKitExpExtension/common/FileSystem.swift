@@ -366,7 +366,7 @@ public final class FileSystem: Sendable {
         }
         if let (zipInfo, zipId) = childrenData.childrenForZipId {
             let zipEntries = try await getZipChildren(zipInfo: zipInfo, zipId: zipId)
-            if let child = zipEntries[name] {
+            if let child = zipEntries[name.data] {
                 let identifier = getNodeId(rootNodeInd: nodeData.rootNode.rootNodeInd, zipId: child)
                 return (identifier, name)
             }
@@ -466,14 +466,13 @@ public final class FileSystem: Sendable {
         let childrenData = try await getChildrenData(nodeData: nodeData)
 
         if let children = childrenData.children {
-            for (name, child) in children.entries() {
+            let listing = children.getListing()
+            let skip = cookie.rawValue > currentOffset ? min(cookie.rawValue - currentOffset, UInt64(listing.count)) : 0
+            currentOffset += skip
+            for (name, child) in listing.dropFirst(Int(skip)) {
                 defer {
                     currentOffset += 1
                 }
-                if currentOffset < cookie.rawValue {
-                    continue
-                }
-
                 let ok = packer.packEntry(
                     name: FSFileName(string: name),
                     itemType: getItemType(rootNode: child, zipID: nil),
@@ -491,21 +490,23 @@ public final class FileSystem: Sendable {
 
         if let (zipInfo, zipId) = childrenData.childrenForZipId {
             let zipEntries = try await getZipChildren(zipInfo: zipInfo, zipId: zipId)
-            for (name, zipId) in zipEntries.entries() {
-                if let children = childrenData.children {
-                    if children[name.string!] != nil {
-                        continue
-                    }
-                }
+            let listing = zipEntries.getListing()
+            let skip = cookie.rawValue > currentOffset ? min(cookie.rawValue - currentOffset, UInt64(listing.count)) : 0
+            currentOffset += skip
+
+            for (name, zipId) in listing.dropFirst(Int(skip)) {
                 defer {
                     currentOffset += 1
                 }
-                if currentOffset < cookie.rawValue {
-                    continue
-                }
+                // todo  do it in insert level
+                // if let children = childrenData.children {
+                //     if children[name.string!] != nil {
+                //         continue
+                //     }
+                // }
 
                 let ok = packer.packEntry(
-                    name: name,
+                    name: FSFileName(data: name),
                     itemType: getItemType(rootNode: nodeData.rootNode, zipID: zipId),
                     itemID: getNodeId(rootNodeInd: nodeData.rootNode.rootNodeInd, zipId: zipId),
                     nextCookie: FSDirectoryCookie(UInt64(currentOffset + 1)),
