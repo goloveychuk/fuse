@@ -15,11 +15,17 @@ actor AsyncMemoize<T: Sendable> {
         self.task = task
     }
 
-    func clear() {
+    func clear() -> Bool {
+        if isLoading {
+            return false
+        }
         result = nil
+        return true
     }
     
     func callAsFunction() async throws -> T {
+        // result =  .success(try await task())
+        // return try result!.get()
         // Return cached result if available
         if let result = result {
             return try result.get()
@@ -77,10 +83,15 @@ final class Cached<T: Sendable>: @unchecked Sendable {
 
 
     func cleanIfNeeded() async {
-        let now = Date().timeIntervalSince1970
         let lastUsed = lastUsedTime.load(ordering: .relaxed)
+        if (lastUsed == 0){
+            return
+        }
+        let now = Date().timeIntervalSince1970
         if now - lastUsed > maxAge {
-            await memoized.clear()
+            if (await memoized.clear()) {
+                lastUsedTime.store(0, ordering: .relaxed)
+            }
         }
     }
 
