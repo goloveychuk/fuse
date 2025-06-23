@@ -141,7 +141,6 @@ func main() throws {
         let fs = context.fileSystem!
 
         let name = String(cString: name!)
-
         Task.detached {
 
             // print("lookup: parent=\(parent), name=\(name)")
@@ -162,7 +161,7 @@ func main() throws {
 
                 fuse_reply_entry(req.value, &entry)
             } catch {
-                if error is POSIXErrorCode && error.rawValue == ENOENT {
+                if let error = error as? POSIXErrorCode, error.rawValue == ENOENT {
                     // for negative lookup cache
                     var entry = fuse_entry_param(
                         ino: 0,
