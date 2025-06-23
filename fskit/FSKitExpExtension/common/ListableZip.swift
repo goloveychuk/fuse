@@ -55,8 +55,8 @@ struct Indexed<T: Sendable>: Sendable {
         if ( entries.count > 0 && entries[high].0.lexicographicallyPrecedes(key)) {
             return high + 1
         }
-        let debug = entries.map { String(data: $0.0, encoding: .utf8) }
-        print(debug)
+        // let debug = entries.map { String(data: $0.0, encoding: .utf8) }
+        // print(debug)
 
         while low <= high {
             let mid = (low + high) / 2
