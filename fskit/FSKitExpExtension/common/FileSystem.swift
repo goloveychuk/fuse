@@ -50,7 +50,7 @@ final class FileIdEncoder: Sendable {
         value2Mask = UInt64((1 << bitAllocation.value2Bits) - 1) << value2Shift
         value3Mask = UInt64((1 << bitAllocation.value3Bits) - 1) << value3Shift
     }
-    func encodeTuple(value1: UInt, value2: UInt, value3: UInt) -> UInt64 {
+    func encodeTuple(value1: UInt, value2: UInt, value3: ZipInd) -> UInt64 {
         // Check for potential overflow based on bit allocation
         guard value1 < (1 << bitAllocation.value1Bits) else {
             fatalError(
@@ -72,12 +72,12 @@ final class FileIdEncoder: Sendable {
             | (UInt64(value3) << value3Shift)
     }
 
-    func decodeTuple(encoded: UInt64) -> (value1: UInt, value2: UInt, value3: UInt) {
+    func decodeTuple(encoded: UInt64) -> (value1: UInt, value2: UInt, value3: ZipInd) {
 
         // Extract each value using the masks and shifts
         let value1 = UInt((encoded & value1Mask) >> value1Shift)
         let value2 = UInt((encoded & value2Mask) >> value2Shift)
-        let value3 = UInt((encoded & value3Mask) >> value3Shift)
+        let value3 = ZipInd((encoded & value3Mask) >> value3Shift)
 
         return (value1, value2, value3)
     }
@@ -166,7 +166,6 @@ public final class FileSystem: Sendable {
         startCleaningWorker()
     }
 
-
     private func startCleaningWorker() {
         Task { [zipCache] in
             while true {
@@ -177,6 +176,24 @@ public final class FileSystem: Sendable {
             }
         }
     }
+
+
+    // private func startCleaningWorker() {
+    //     Task { [zipCache] in
+    //         while true {
+    //             try await Task.sleep(for: .seconds(3))
+    //             print("allocated")  
+    //             for (_, cachedZip) in zipCache {
+    //                 try await cachedZip.get()
+    //             }
+    //             try await Task.sleep(for: .seconds(1))
+    //             print("cleaning")
+    //             for (_, cachedZip) in zipCache {
+    //                 await cachedZip.cleanIfNeeded()
+    //             }
+    //         }
+    //     }
+    // }
 
     
     private func getNodeByFileId(_ fileid: FSItem.Identifier) -> Inode {
@@ -203,7 +220,7 @@ public final class FileSystem: Sendable {
 
     private func getNodeId(rootNodeInd: UInt, zipId: ZipID?) -> FSItem.Identifier {
         var type: UInt
-        var zipInd: UInt
+        var zipInd: ZipInd
         switch zipId {
         case .file(let entryId):
             zipInd = entryId

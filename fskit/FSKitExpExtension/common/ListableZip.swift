@@ -158,11 +158,12 @@ extension Permissions {
         self = Permissions(fromUnsafe & 0b111_111_111) // getting standard rwx permissions
     }
 }
-
+typealias ZipInd = UInt32
+            
 enum ZipID: Hashable, Sendable {
-    case file(entryId: UInt)
-    case symlink(entryId: UInt)
-    case dir(listingId: UInt)
+    case file(entryId: ZipInd)
+    case symlink(entryId: ZipInd)
+    case dir(listingId: ZipInd)
     static var root: ZipID {
         return .dir(listingId: 0)
     }
@@ -301,10 +302,10 @@ struct ZipStat {
 
 
 protocol PublicZip: Sendable {
-    func statEntry(index: UInt) throws -> ZipStat
-    func readLink(index: UInt) throws -> Data
-    func readData(index: UInt, offset: off_t, length: Int, buffer: MutableBufferLike) throws -> Int
-    func writeData(index: UInt, data: Data, offset: off_t) throws -> Int
+    func statEntry(index: ZipInd) throws -> ZipStat
+    func readLink(index: ZipInd) throws -> Data
+    func readData(index: ZipInd, offset: off_t, length: Int, buffer: MutableBufferLike) throws -> Int
+    func writeData(index: ZipInd, data: Data, offset: off_t) throws -> Int
     var listable: ListableZip { get }
 } 
 
@@ -320,7 +321,7 @@ final class ListableZip : PublicZip, Sendable {
     private static let END_OF_CENTRAL_DIRECTORY: UInt32 = 0x0605_4b50
 
     private let allEntries: [MinEntry] 
-    private let parentMapping: [ZipID: Int]
+    private let parentMapping: [ZipID: ZipInd]
     private let listings: Listings
     private let fileURL: URL
 
@@ -353,11 +354,11 @@ final class ListableZip : PublicZip, Sendable {
         return listings[Int(index)]
     }
 
-    public func getEntry(index: UInt) -> MinEntry {
+    public func getEntry(index: ZipInd) -> MinEntry {
         return allEntries[Int(index)]
     }
 
-    public func readLink(index: UInt) throws -> Data {
+    public func readLink(index: ZipInd) throws -> Data {
         let zipEntry = getEntry(index: index)
         if zipEntry.compressionMethod != .store {
             throw fs_errorForPOSIXError(POSIXError.EIO)
@@ -365,16 +366,16 @@ final class ListableZip : PublicZip, Sendable {
         return try rawReadAllDataIntoBuffer(index: index)
     }
 
-    func writeData(index: UInt, data: Data, offset: off_t) throws -> Int {
+    func writeData(index: ZipInd, data: Data, offset: off_t) throws -> Int {
         throw fs_errorForPOSIXError(POSIXError.EROFS)
     }
 
-    func statEntry(index: UInt) -> ZipStat {
+    func statEntry(index: ZipInd) -> ZipStat {
         let entry = getEntry(index: index)
         return ZipStat(size: entry.size, allocSize: entry.compressedSize, permissions: entry.permissions)
     }
 
-    public func readData(index: UInt, offset: off_t, length: Int, buffer: MutableBufferLike) throws -> Int {
+    public func readData(index: ZipInd, offset: off_t, length: Int, buffer: MutableBufferLike) throws -> Int {
         if (buffer.length != length) {
             throw fs_errorForPOSIXError(POSIXError.EIO) //todo
         }
@@ -422,7 +423,7 @@ final class ListableZip : PublicZip, Sendable {
             }
     }
 
-    private func rawReadAllDataIntoBuffer(index: UInt)  throws -> Data {
+    private func rawReadAllDataIntoBuffer(index: ZipInd)  throws -> Data {
         let zipEntry = getEntry(index: index)
         var data = Data(capacity: Int(zipEntry.compressedSize))
         let read = try  data.withUnsafeMutableBytes { (body:UnsafeMutableRawBufferPointer)  throws -> Int in
@@ -437,7 +438,7 @@ final class ListableZip : PublicZip, Sendable {
     }
 
     private func rawReadData(
-        index: UInt, offset: Int, length: Int, bufferPointer: UnsafeMutableRawBufferPointer
+        index: ZipInd, offset: Int, length: Int, bufferPointer: UnsafeMutableRawBufferPointer
     )  throws -> Int {
         let entry = getEntry(index: index)
 
@@ -507,7 +508,7 @@ final class ListableZip : PublicZip, Sendable {
         if (zipID == .root) {
             return nil
         }
-        return .dir(listingId: UInt(parentMapping[zipID]!))
+        return .dir(listingId: parentMapping[zipID]!)
     }
 
 
@@ -515,17 +516,17 @@ final class ListableZip : PublicZip, Sendable {
         self.fileURL = fileURL
         let entries = try await ListableZip.readZipEntries(fileURL: fileURL)
         var listings = Listings()
-        var parentMapping = [ZipID: Int]()
+        var parentMapping = [ZipID: ZipInd]()
         var allEntries = [MinEntry]()
 
-        var nameToIndMap = [ZipPathSegment: Int]()
+        var nameToIndMap = [ZipPathSegment: ZipInd]()
 
         func addDirectory(parent: ZipPathSegment) throws -> ZipID {
             if nameToIndMap[parent] != nil {
                 throw ZipError.invalidListing("Directory already exists")
             }
-            let newIndex = ZipID.dir(listingId: UInt(listings.count))
-            nameToIndMap[parent] = listings.count
+            let newIndex = ZipID.dir(listingId: ZipInd(listings.count))
+            nameToIndMap[parent] = ZipInd(listings.count)
             listings.append(Indexed())
             return newIndex
         }
@@ -534,7 +535,7 @@ final class ListableZip : PublicZip, Sendable {
             guard let parentId = nameToIndMap[parent] else {
                 throw ZipError.invalidListing("Parent directory not found")
             }
-            listings[parentId][childName] = childID
+            listings[Int(parentId)][childName] = childID
             parentMapping[childID] = parentId
         }
 
@@ -558,9 +559,9 @@ final class ListableZip : PublicZip, Sendable {
                 )
 
                 if entry.isSymbolicLink {
-                    zipID = ZipID.symlink(entryId: UInt(ind))
+                    zipID = ZipID.symlink(entryId: ZipInd(ind))
                 } else {
-                    zipID = ZipID.file(entryId: UInt(ind))
+                    zipID = ZipID.file(entryId: ZipInd(ind))
                 }
             }
             let (parent, name) = entry.name.splitPathParent()

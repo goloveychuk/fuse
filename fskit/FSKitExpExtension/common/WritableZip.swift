@@ -28,7 +28,7 @@ final class ThreadSafeSet<T: Hashable>: @unchecked Sendable {
 final class WritableZip: PublicZip, Sendable {
     let config: WritableConfig
 
-    let detached = ThreadSafeSet<UInt>()
+    let detached = ThreadSafeSet<ZipInd>()
     let listableZip: ListableZip
     let detachedDir: URL
     init(config: WritableConfig, fileURL: URL) async throws {
@@ -39,7 +39,7 @@ final class WritableZip: PublicZip, Sendable {
         if (FileManager.default.fileExists(atPath: detachedDir.path)) {
             let files = try FileManager.default.contentsOfDirectory(at: detachedDir, includingPropertiesForKeys: nil)
             for file in files {
-                detached.insert(UInt(file.lastPathComponent)!)
+                detached.insert(ZipInd(file.lastPathComponent)!)
             }
         }
         self.listableZip = try await ListableZip(fileURL: fileURL)
@@ -49,11 +49,11 @@ final class WritableZip: PublicZip, Sendable {
         return listableZip
     }
 
-    private func detachedFilePath(_ index: UInt) -> URL {
+    private func detachedFilePath(_ index: ZipInd) -> URL {
         return detachedDir.appendingPathComponent("\(index)")
     }
 
-    func statEntry(index: UInt) throws -> ZipStat {
+    func statEntry(index: ZipInd) throws -> ZipStat {
         if detached.contains(index) {
             let stat = listableZip.statEntry(index: index)
             let realStat = try FileManager.default.attributesOfItem(atPath: detachedFilePath(index).path)
@@ -63,10 +63,10 @@ final class WritableZip: PublicZip, Sendable {
             return listableZip.statEntry(index: index)
         }
     }
-    func readLink(index: UInt) throws -> Data {
+    func readLink(index: ZipInd) throws -> Data {
         return try listableZip.readLink(index: index)
     }
-    func readData(index: UInt, offset: off_t, length: Int, buffer: MutableBufferLike) throws -> Int {
+    func readData(index: ZipInd, offset: off_t, length: Int, buffer: MutableBufferLike) throws -> Int {
         if detached.contains(index) {
             let fileHandle = try FileHandle(forReadingFrom: detachedFilePath(index))
             defer {
@@ -84,7 +84,7 @@ final class WritableZip: PublicZip, Sendable {
     }
 
     // I don't do proper locking because write is only for devvelopment usecase
-    func writeData(index: UInt, data: Data, offset: off_t) throws -> Int {
+    func writeData(index: ZipInd, data: Data, offset: off_t) throws -> Int {
         let detachedFile = detachedFilePath(index)
 
         if !detached.contains(index) {
