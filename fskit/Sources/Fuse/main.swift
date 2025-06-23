@@ -3,8 +3,6 @@ import Foundation
 import clibfuse
 import common
 
-
-
 class Context {
     var fileSystem: FileSystem!
 }
@@ -58,7 +56,7 @@ class PlusPacker: FSDirectoryEntryPacker {
         //     attr.linkCount = 2
         //     attr.size = 0
         // } else {
-            // attr = attributes!
+        // attr = attributes!
         // }
 
         var entry = fuse_entry_param(
@@ -131,6 +129,22 @@ func main() throws {
     // operations.open =  ?
     // operations.flush =  ?
     // operations.release =  ?
+    operations.`init` = { (req, conn) in
+        if !fuse_set_feature_flag(conn, UInt64(FUSE_CAP_SPLICE_MOVE)) {
+            print("Warning: FUSE_CAP_SPLICE_MOVE not supported")
+        }
+
+        if !fuse_set_feature_flag(conn, UInt64(FUSE_CAP_SPLICE_WRITE)) {
+            print("Warning: FUSE_CAP_SPLICE_WRITE not supported")
+        }
+        // does not make sense, I have large timeout
+        // if (!fuse_set_feature_flag(conn, UInt64(FUSE_CAP_AUTO_INVAL_DATA))) {
+        //     print("Warning: FUSE_CAP_AUTO_INVAL_DATA not supported")
+        // }
+        if !fuse_set_feature_flag(conn, UInt64(FUSE_CAP_CACHE_SYMLINKS)) {
+            print("Warning: FUSE_CAP_CACHE_SYMLINKS not supported")
+        }
+    }
     operations.opendir = { (req, ino, fi) in
         fi!.pointee.cache_readdir = 1
         fi!.pointee.keep_cache = 1
@@ -229,26 +243,22 @@ func main() throws {
                 )
 
                 _ = buffer.withUnsafeMutableBytes { rawBuffer in
-                    fuse_reply_buf(req.value, rawBuffer.baseAddress!, written)
+                    // fuse_reply_buf(req.value, rawBuffer.baseAddress!, written)
+                    var bufvec = fuse_bufvec(
+                        count: 1, idx: 0, off: 0,
+                        buf: fuse_buf(
+                            size: written,
+                            flags: fuse_buf_flags(0),
+                            mem: rawBuffer.baseAddress!,
+                            fd: 0,
+                            pos: 0,
+                            mem_size: MemoryLayout<UnsafeRawPointer>.size
+                        )
+                    )
+                    return fuse_reply_data(
+                        req.value, &bufvec,
+                        FUSE_BUF_SPLICE_MOVE)
                 }
-
-                // // Use zero-copy reply when possible
-                // if let mappedData = fileData.zeroCopyData {
-                //     // Option 1: Zero-copy using fuse_buf with FUSE_BUF_IS_FD flag
-                //     var buf = fuse_bufvec(count: 1, idx: 0, off: 0, buf: [
-                //         fuse_buf(
-                //             size: mappedData.size,
-                //             flags: UInt32(FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK),
-                //             fd: mappedData.fd,
-                //             pos: mappedData.position
-                //         )
-                //     ])
-                //     fuse_reply_data(req.value, &buf, UInt32(FUSE_BUF_COPY_FLAGS))
-                // } else {
-                //     // Option 2: Standard reply for when zero-copy isn't possible
-                //     // Use the regular data buffer
-
-                // }
             } catch {
                 reply_err(req.value, error)
             }
@@ -416,7 +426,7 @@ func main() throws {
     for arg in cArgs where arg != nil {
         free(arg)
     }
-    
+
     exit(ret)
 
     // print("FUSE filesystem exited with status: \(result)")
