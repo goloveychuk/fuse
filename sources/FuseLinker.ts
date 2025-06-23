@@ -4,10 +4,10 @@ import { ZipOpenFS } from '@yarnpkg/libzip';
 import { jsInstallUtils } from '@yarnpkg/plugin-pnp';
 import { UsageError } from 'clipanion';
 import { FuseNode } from './types';
-import { mountFuse } from './runFuse';
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import * as crypto from 'crypto';
+import { getMounter, Mounter } from './mount';
 
 function assign(node: FuseNode, data: FuseNode) {
   Object.assign(node, data);
@@ -151,13 +151,14 @@ const getPathNode = (start: FuseNode, path: PortablePath) => {
 class FuseInstaller implements Installer {
   private readonly asyncActions = new miscUtils.AsyncActions(5);
   private readonly indexFolderPromise: Promise<PortablePath>;
-  private fuseIsSupported: boolean;
-
+  private fuseIsSupported: Promise<boolean>;
+  private mounter: Mounter;
   constructor(private opts: LinkOptions) {
     this.indexFolderPromise = setupCopyIndex(xfs, {
       indexPath: ppath.join(opts.project.configuration.get(`globalFolder`), `index`),
     });
-    this.fuseIsSupported = process.env.FUSE === 'true';
+    this.mounter = getMounter();
+    this.fuseIsSupported = this.mounter.supportsFuse();
   }
 
   private customData: FuseCustomData = {
@@ -216,7 +217,7 @@ class FuseInstaller implements Installer {
     const dependencyMeta = this.opts.project.getDependencyMeta(devirtualizedLocator, pkg.version);
     const buildRequest = jsInstallUtils.extractBuildRequest(pkg, buildConfig, dependencyMeta, { configuration: this.opts.project.configuration });
 
-    const packagePaths = getPackagePaths(pkg, { project: this.opts.project, buildRequest, fuseIsSupported: this.fuseIsSupported });
+    const packagePaths = getPackagePaths(pkg, { project: this.opts.project, buildRequest, fuseIsSupported: await this.fuseIsSupported });
     const packageLocation = packagePaths.packageLocation;
 
     this.customData.locatorByPath.set(packageLocation, structUtils.stringifyLocator(pkg));
@@ -456,6 +457,11 @@ class FuseInstaller implements Installer {
     // const toPersist: DependencyData[] = [];
 
     const mountRoot = getStoreLocation(this.opts.project, { unplugged: false });
+    const fuseIsSupported = await this.fuseIsSupported;
+    let unmountPromise: Promise<void> | null = null;
+    if (fuseIsSupported) {
+      unmountPromise = this.mounter.unmount(mountRoot); //todo run it sooner
+    }
 
     for (const [locatorHash, dependencyData] of this.customData.allDependencies) {
       let relative = ppath.relative(mountRoot, dependencyData.packageLocation);
@@ -506,13 +512,21 @@ class FuseInstaller implements Installer {
       }
     }
     let promises: Promise<unknown>[] = []
-    if (this.fuseIsSupported) {
+    if (fuseIsSupported) {
       const fuseStatePath = ppath.join(
         this.opts.project.cwd,
         `.yarn/fuse-state.json`,
       );
+      await unmountPromise;
       await xfs.changeFilePromise(fuseStatePath, JSON.stringify(fuseData), {});
-      promises.push(mountFuse(mountRoot, fuseStatePath));
+      const upperDir = mountRoot + '.upper' as PortablePath
+      if (!await xfs.existsPromise(mountRoot)) {
+        await xfs.mkdirpPromise(mountRoot);
+      }
+      if (!await xfs.existsPromise(upperDir)) {
+        await xfs.mkdirpPromise(upperDir);
+      }
+      promises.push(this.mounter.mount(mountRoot, fuseStatePath, upperDir));
     }
     await Promise.all([
       this.asyncActions.wait(),

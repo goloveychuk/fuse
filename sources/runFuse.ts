@@ -20,22 +20,10 @@ async function checkChecksum(p: string, checksum: string) {
     throw new Error(`Checksum mismatch for ${p}`);
   }
 }
-const MAGIC_PATH = '.00unmount';
 
 
 
-async function waitToMount(nmPath: PortablePath) {
-  const p = ppath.join(nmPath, MAGIC_PATH);
-  const deadLine = Date.now() + 10_000;
-  for await (const _ of setInterval(300)) {
-    if (Date.now() > deadLine) {
-      throw new Error('Timeout waiting for fuse to mount');
-    }
-    if (await xfs.existsPromise(p)) {
-      break;
-    }
-  }
-}
+
 
 function downloadFile(url: string, dest: string) {
   const tmpPath = path.join(os.tmpdir(), crypto.randomUUID());
@@ -67,17 +55,7 @@ async function downloadFileOrCache(url: string): Promise<string> {
 
 async function unmountFuse(mountRoot: PortablePath) {
   // df -h /tmp/Volume
-  spawn('umount', ["-f", mountRoot], {
-    //todo run in background
-    // detached: true,
-    stdio: 'inherit',
-  });
-  // if (result.status !== 0) { //todo
-  //   const lsof = spawnSync('lsof', ['+D', mountRoot]).stdout.toString();
-  //   throw new Error(
-  //     `Failed to unmount fuse: ${lsof}, used by processes:\n${lsof}`,
-  //   );
-  // }
+  
 }
 
 export async function mountFuse(mountRoot: PortablePath, confPath: string) {
