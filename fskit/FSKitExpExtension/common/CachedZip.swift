@@ -11,7 +11,7 @@ actor AsyncMemoize<T: Sendable> {
     private var continuations = [CheckedContinuation<T, Error>]()
     private let task: () async throws -> T
     
-    init(_ task: @escaping () async throws -> T) {
+    init(_ task: consuming @escaping () async throws -> T) {
         self.task = task
     }
 
@@ -76,7 +76,7 @@ final class Cached<T: Sendable>: @unchecked Sendable {
     let lastUsedTime = Atomic<TimeInterval>(0)
     private let memoized: AsyncMemoize<T>
 
-    init(_ getZip: @escaping @Sendable () async throws -> T) {
+    init(_ getZip: consuming @escaping @Sendable () async throws -> T) {
         refCount = 1
         self.memoized = AsyncMemoize(getZip)
     }
