@@ -422,7 +422,7 @@ public final class FileSystem: Sendable {
     private func getZipChildren(zipInfo: ZipInfo, zipId: ZipID) async throws -> Indexed<ZipID> {
         let cachedZip = zipInfo.cachedZip
         let zip = try await cachedZip.get()
-        let zipEntries = zip.listable.getChildren(forId: zipId)
+        let zipEntries = try zip.listable.getChildren(forId: zipId)
         return zipEntries
     }
 

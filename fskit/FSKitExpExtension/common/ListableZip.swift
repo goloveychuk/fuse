@@ -15,65 +15,47 @@ enum ZipError: Error {
 
 struct Indexed<T: Sendable>: Sendable {
     typealias Key = Data
-
+    private let sorted: Bool
     private var entries: [(Key, T)]
 
-    init() {
-        //todo optimizae for 30 count
-        self.entries = []
+    init(_ entries: [(Key, T)]) {
+        if (entries.count > 30) {
+            self.entries = entries.sorted { $0.0.lexicographicallyPrecedes($1.0) }
+            self.sorted = true
+        } else {
+            self.entries = entries
+            self.sorted = false
+        }
     }
 
     func getListing() ->  [(Key, T)] {
         return entries
     }
 
-    // func entries() -> [(Key, T)] {
-    //     return items.lazy.map { (FSFileName(data: $0.key), $0.value) } //todo ceheck lazy
-    // }
-
-    func findIndexInSorted(key: Key) -> Int? {
-        var low = 0
-        var high = entries.count - 1
-        while low <= high {
-            let mid = (low + high) / 2
-            if entries[mid].0 == key {
-                return mid
-            } else if entries[mid].0.lexicographicallyPrecedes(key) {
-                low = mid + 1
-            } else {
-                high = mid - 1
+    func find(key: Key) -> T? {
+        if sorted {
+            var low = 0
+            var high = entries.count - 1
+            while low <= high {
+                let mid = (low + high) / 2
+                if entries[mid].0 == key {
+                    return entries[mid].1
+                } else if entries[mid].0.lexicographicallyPrecedes(key) {
+                    low = mid + 1
+                } else {
+                    high = mid - 1
+                }
             }
+            return nil
         }
-        return nil
+        return entries.first { $0.0 == key }?.1
     }
 
 
-    private func insertionPoint(for key: Key) -> Int {
-        var low = 0
-        var high = entries.count - 1
-        // fast path for sorted inserts
-        if ( entries.count > 0 && entries[high].0.lexicographicallyPrecedes(key)) {
-            return high + 1
-        }
-        // let debug = entries.map { String(data: $0.0, encoding: .utf8) }
-        // print(debug)
-
-        while low <= high {
-            let mid = (low + high) / 2
-
-            if entries[mid].0.lexicographicallyPrecedes(key) {
-                low = mid + 1
-            } else {
-                high = mid - 1
-            }
-        }
-
-        return low
-    }
 
     subscript(index: Key) -> T? {
-        if let foundIndex = findIndexInSorted(key: index) {
-            return entries[foundIndex].1
+        if let val = find(key: index) {
+            return val
         }
         return nil
         // if let foundIndex = findIndex(for: index) {
@@ -84,13 +66,7 @@ struct Indexed<T: Sendable>: Sendable {
 
     subscript(index: Key) -> T {
         get {
-            let foundIndex = findIndexInSorted(key: index)!
-            return entries[foundIndex].1
-        }
-        set(newValue) {
-            //todo check for dublicates
-            let insertAt = insertionPoint(for: index)
-            entries.insert((index, newValue), at: insertAt)
+            return find(key: index)!
         }
     }
 }
@@ -347,9 +323,9 @@ final class ListableZip : PublicZip, Sendable {
         return currentId
     }
 
-    func getChildren(forId: ZipID) -> Indexed<ZipID> {
+    func getChildren(forId: ZipID) throws -> Indexed<ZipID> {
         guard case .dir(let index) = forId else {
-            return Indexed() //todo throw
+            throw fs_errorForPOSIXError(POSIXError.ENOTDIR)
         }
         return listings[Int(index)]
     }
@@ -515,7 +491,7 @@ final class ListableZip : PublicZip, Sendable {
     init(fileURL: URL) async throws {
         self.fileURL = fileURL
         let entries = try await ListableZip.readZipEntries(fileURL: fileURL)
-        var listings = Listings()
+        var listings = [[(Data, ZipID)]]()
         var parentMapping = [ZipID: ZipInd]()
         var allEntries = [MinEntry]()
 
@@ -527,7 +503,7 @@ final class ListableZip : PublicZip, Sendable {
             }
             let newIndex = ZipID.dir(listingId: ZipInd(listings.count))
             nameToIndMap[parent] = ZipInd(listings.count)
-            listings.append(Indexed())
+            listings.append([])
             return newIndex
         }
 
@@ -535,7 +511,7 @@ final class ListableZip : PublicZip, Sendable {
             guard let parentId = nameToIndMap[parent] else {
                 throw ZipError.invalidListing("Parent directory not found")
             }
-            listings[Int(parentId)][childName] = childID
+            listings[Int(parentId)].append((childName, childID))
             parentMapping[childID] = parentId
         }
 
@@ -568,7 +544,7 @@ final class ListableZip : PublicZip, Sendable {
             try addListings(parent: parent, childName: name, childID: zipID)
         }
         // let stringified = listings.print()
-        self.listings = listings
+        self.listings = listings.map { Indexed($0) }
         self.parentMapping = parentMapping
         self.allEntries = allEntries
     }
