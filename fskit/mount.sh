@@ -7,11 +7,11 @@
 
 # kill -9 $!
 
-umount ./test2 || true
+umount -f /tmp/asd|| true
 # -v verbose
 # -F - force fskit
 # 
-mount -F -t MyFS -o -m=/Users/vadymh/github/fskit/FSKitSample/example/.yarn/fuse-state.json,-u=/Users/vadymh/github/fskit/FSKitSample/upper /dev/disk4 ./test2
+mount -F -t MyFS -o -m=/Users/vadymh/github/fskit/FSKitSample/example/.yarn/fuse-state.json,-u=/Users/vadymh/github/fskit/FSKitSample/upper /dev/disk4 /tmp/asd
 # mount -F -t MyFS -o -m=./build.sh,-d=./  /dev/disk5 ./test2
 biggest_pid=$(pgrep FSKitExpExtension | sort -n | tail -1 | tr -d ' ')
 echo "FSKIT PID: $biggest_pid"

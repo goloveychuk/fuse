@@ -12,7 +12,7 @@ umount "$SCRIPT_DIR/test" 2>/dev/null || true
 
 # Mount using relative paths
 # -u "/tmp/fuse-mount3-changes"
-"$REPO_ROOT/fskit/.build/release/Fuse" -m "$REPO_ROOT/example/.yarn/fuse-state.json" "/tmp/asd"
+"$REPO_ROOT/fskit/.build/release/Fuse" --manifest "$REPO_ROOT/example/.yarn/fuse-state.json" "/tmp/asd"
 
 # Unmount when done
 umount "$SCRIPT_DIR/test"
