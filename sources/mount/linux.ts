@@ -6,16 +6,23 @@ import { fetchArtifact, getPackageInfoForPlatform } from '../fetchBinary';
 import path from 'path';
 import fs from 'fs';
 
+const noResult = Symbol('noResult');
+
+function memo<T>(fn: () => Promise<T>) {
+  let value: T | typeof noResult = noResult;
+  return async () => {
+    if (value === noResult) {
+      value = await fn();
+    }
+    return value;
+  }
+}
 export class LinuxMounter implements Mounter {
   packageInfo: PackageInfo | null;
   constructor(private report: Report) {
     this.packageInfo = getPackageInfoForPlatform();
   }
-  async mount(
-    mountRoot: PortablePath,
-    confPath: string,
-    upperDir: PortablePath,
-  ) {
+  private fetchBinaries = memo(async () => {
     if (!this.packageInfo) {
       throw new Error('Should not be called');
     }
@@ -35,8 +42,18 @@ export class LinuxMounter implements Mounter {
         })).code !== 0) {
             throw new Error(`Failed to chmod fusermount3`);
         }
-
     }
+    return {
+      fuseExecPath,
+    }
+  })
+  async mount(
+    mountRoot: PortablePath,
+    confPath: string,
+    upperDir: PortablePath,
+  ) {
+    const { fuseExecPath } = await this.fetchBinaries();
+    console.log('running', fuseExecPath, '--manifest', confPath, '--detach', mountRoot);
     const res = await execUtils.execvp(
       fuseExecPath,
       ['--manifest', confPath, '--detach', mountRoot],
@@ -49,12 +66,13 @@ export class LinuxMounter implements Mounter {
     }
   }
   async unmount(mountRoot: PortablePath) {
-    const res = await execUtils.execvp('umount', ['-f', mountRoot], {
+    await this.fetchBinaries();
+    const res = await execUtils.execvp('fusermount3', ['-u', mountRoot, '-o', '-f'], {
       encoding: 'utf8',
       cwd: process.cwd() as PortablePath,
     });
     if (res.code !== 0) {
-      if (res.stderr.includes('not mounted')) {
+      if (res.stderr.includes('not found in /etc/mtab')) {
         return;
       }
       throw new Error(`Failed to unmount Fuse: ${res.stderr}`);
