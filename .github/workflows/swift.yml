@@ -87,7 +87,7 @@ jobs:
         # . ~/.local/share/swiftly/env.sh
         swift -version
         swift build --static-swift-stdlib -c release
-        cp $(which fusermount3) fskit/.build/release/
+        cp $(which fusermount3) .build/release/
 
       working-directory: "fskit"
     # - name: Compress //gzip compression is better
