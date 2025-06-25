@@ -5,8 +5,44 @@ import { execUtils, MessageName, Report } from '@yarnpkg/core';
 import { fetchArtifact, getPackageInfoForPlatform } from '../fetchBinary';
 import path from 'path';
 import fs from 'fs';
+import { spawn } from 'child_process';
+
+
+
+function isExecutableAvailable(executable: string): Promise<boolean> {
+  return new Promise(resolve => {
+    const process = spawn(executable, ['--version']);
+    
+    process.on('error', (err) => {
+      // ENOENT means the executable doesn't exist
+      if ((err as any).code === 'ENOENT') {
+        resolve(false);
+      } else {
+        // Other errors might mean permissions issues or other problems
+        // but the executable likely exists
+        resolve(true);
+      }
+    });
+    
+    // If we get here, the process was spawned successfully
+    process.on('close', () => {
+      resolve(true);
+    });
+  });
+}
 
 const noResult = Symbol('noResult');
+
+async function execThrow(command: string, args: string[]) {
+  const res = await execUtils.execvp(command, args, {
+    cwd: process.cwd() as PortablePath,
+    encoding: 'utf8',
+  });
+  if (res.code !== 0) {
+    throw new Error(`Failed to execute ${command}: ${res.stderr}`);
+  }
+  return res;
+}
 
 function memo<T>(fn: () => Promise<T>) {
   let value: T | typeof noResult = noResult;
@@ -30,18 +66,10 @@ export class LinuxMounter implements Mounter {
     const fuseExecPath = path.join(dirPath, 'Fuse');
     fs.chmodSync(fuseExecPath, '755');
     if (!await this.hasFusermount3()) {
-        const fusermount3Path = '/usr/bin/fusermount3'
-        fs.chmodSync(fusermount3Path, '755');
-        if ((await execUtils.execvp('sudo', ['chown', 'root:root', fusermount3Path], {
-            cwd: process.cwd() as PortablePath,
-        })).code !== 0) {
-            throw new Error(`Failed to chown fusermount3`);
-        }
-        if ((await execUtils.execvp('sudo', ['chmod', 'u+s', fusermount3Path], {
-            cwd: process.cwd() as PortablePath,
-        })).code !== 0) {
-            throw new Error(`Failed to chmod fusermount3`);
-        }
+      const fusermount3Path = '/usr/local/bin/fusermount3'
+      await execThrow('sudo', ['cp', path.join(dirPath, 'fusermount3'), fusermount3Path]);
+      await execThrow('sudo', ['chown', 'root:root', fusermount3Path]);
+      await execThrow('sudo', ['chmod', '4755', fusermount3Path]);
     }
     return {
       fuseExecPath,
@@ -53,17 +81,7 @@ export class LinuxMounter implements Mounter {
     upperDir: PortablePath,
   ) {
     const { fuseExecPath } = await this.fetchBinaries();
-    console.log('running', fuseExecPath, '--manifest', confPath, '--detach', mountRoot);
-    const res = await execUtils.execvp(
-      fuseExecPath,
-      ['--manifest', confPath, '--detach', mountRoot],
-      {
-        cwd: process.cwd() as PortablePath,
-      },
-    );
-    if (res.code !== 0) {
-      throw new Error(`Failed to mount Fuse: ${res.stderr}`);
-    }
+    await execThrow(fuseExecPath, ['--manifest', confPath, '--detach', mountRoot]);
   }
   async unmount(mountRoot: PortablePath) {
     await this.fetchBinaries();
@@ -78,20 +96,14 @@ export class LinuxMounter implements Mounter {
       throw new Error(`Failed to unmount Fuse: ${res.stderr}`);
     }
   }
+
   private async hasFusermount3() {
-    const res = await execUtils.execvp('fusermount3', ['-V'], {
-      encoding: 'utf8',
-      cwd: process.cwd() as PortablePath,
-    });
-    return res.code === 0;
+    return await isExecutableAvailable('fusermount3');
   }
   private async hasSudo() {
-    const res = await execUtils.execvp('sudo', ['-V'], {
-      encoding: 'utf8',
-      cwd: process.cwd() as PortablePath,
-    });
-    return res.code === 0;
+    return await isExecutableAvailable('sudo');
   }
+
   async supportsFuse() {
     if (this.packageInfo === null) {
       return false;
@@ -100,10 +112,11 @@ export class LinuxMounter implements Mounter {
       return true;
     }
     if (await this.hasSudo()) {
-        return true
+      return true
     }
     this.report.reportWarningOnce(MessageName.UNNAMED, `No fusermount3 found nor sudo available, Fuse will not be available`);
 
     return false
   }
+
 }
