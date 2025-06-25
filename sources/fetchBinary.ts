@@ -7,11 +7,73 @@ import { tmpdir } from 'os';
 import { pipeline } from 'stream/promises';
 import { mkdir, mkdtemp } from 'fs/promises';
 import * as tar from 'tar';
+import { Transform } from 'stream';
 
 //@ts-ignore-error
 import VERSIONS_DATA from './versions.json';
 
 import { VersionsData, PackageInfo } from './types';
+
+/**
+ * Creates a stream that downloads a file from a URL
+ */
+function createDownloadStream(url: string) {
+  return new Promise<NodeJS.ReadableStream>((resolve, reject) => {
+    const req = https.get(url, (res) => {
+      if (res.statusCode !== 200) {
+        reject(
+          new Error(
+            `Failed to download: ${res.statusCode} ${res.statusMessage}`,
+          ),
+        );
+        return;
+      }
+      resolve(res);
+    });
+    req.on('error', (err) => {
+      reject(err);
+    });
+    req.end();
+  });
+}
+
+/**
+ * Creates a transform stream that checks the hash of the data passing through it
+ */
+function createHashCheckStream(expectedIntegrity: string) {
+  const [algorithm, expectedHashBase64] = expectedIntegrity.split('-');
+  if (!algorithm || !expectedHashBase64) {
+    throw new Error(`Invalid integrity format: ${expectedIntegrity}`);
+  }
+
+  // Remove any URL-safe base64 adjustments and convert to Buffer
+  const expectedHash = Buffer.from(expectedHashBase64, 'base64');
+  const hash = crypto.createHash(algorithm);
+
+  // Create a transform stream that hashes data as it passes through
+  const transformStream = new Transform({
+    transform(
+      chunk: Buffer,
+      encoding: string,
+      callback: (error?: Error | null, data?: any) => void,
+    ) {
+      hash.update(chunk);
+      callback(null, chunk);
+    },
+    flush(callback: (error?: Error | null, data?: any) => void) {
+      const digest = hash.digest();
+      if (Buffer.compare(digest, expectedHash) !== 0) {
+        callback(new Error(`Checksum mismatch`));
+        return;
+      }
+      callback();
+    },
+  });
+
+  return transformStream;
+}
+
+
 
 /**
  * Gets the appropriate binary package info for current platform
@@ -53,8 +115,10 @@ function getPackageInfoForPlatform(
   return matchingPackage;
 }
 
-
-async function verifyIntegrityOrThrow(filePath: string, expectedIntegrity: string) {
+async function verifyIntegrityOrThrow(
+  filePath: string,
+  expectedIntegrity: string,
+) {
   const [algorithm, expectedHashBase64] = expectedIntegrity.split('-');
   if (!algorithm || !expectedHashBase64) {
     throw new Error(`Invalid integrity format: ${expectedIntegrity}`);
@@ -72,91 +136,45 @@ async function verifyIntegrityOrThrow(filePath: string, expectedIntegrity: strin
   }
 }
 
-function downloadFile(url: string, dest: string) {
-    const tmpPath = path.join(os.tmpdir(), crypto.randomUUID());
-    return new Promise<void>((resolve, reject) => {
-      const file = fs.createWriteStream(tmpPath);
-      const req = https.get(url, (res) => {
-        res.pipe(file);
-        file.on('finish', () => {
-          file.close();
-          fs.rename(tmpPath, dest, (err) => {
-            if (err) {
-              reject(err);
-            } else {
-              resolve();
-            }
-          });
+function downloadFileStream(url: string, dest: string) {
+  const tmpPath = path.join(os.tmpdir(), crypto.randomUUID());
+  return new Promise<void>((resolve, reject) => {
+    const file = fs.createWriteStream(tmpPath);
+    const req = https.get(url, (res) => {
+      res.pipe(file);
+      file.on('finish', () => {
+        file.close();
+        fs.rename(tmpPath, dest, (err) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve();
+          }
         });
       });
-      req.on('error', (err) => {
-        reject(err);
-      });
-      req.end();
     });
-  }
+    req.on('error', (err) => {
+      reject(err);
+    });
+    req.end();
+  });
+}
 
 async function downloadAndExtractBinary(
   tarballUrl: string,
   integrity: string,
-): Promise<string> {
+) {
   // Create a temporary directory for the download
   const tempDir = await mkdtemp(path.join(tmpdir(), 'fskit-binary-'));
-  const tarballPath = path.join(tempDir, 'package.tgz');
-
-  try {
-    await downloadFile(tarballUrl, tarballPath);
-    // Verify integrity
-    console.log('Verifying binary integrity...');
-    await verifyIntegrityOrThrow(tarballPath, integrity);
-
-    console.log('Integrity verification passed.');
-
-    // Extract the tarball
-    console.log('Extracting binary...');
-    await tar.extract({
-      file: tarballPath,
+  await pipeline(
+    await createDownloadStream(tarballUrl),
+    createHashCheckStream(integrity),
+    tar.extract({
       cwd: tempDir,
-    });
-
-    // Find the binary in the extracted package
-    // The binary is typically in the package directory
-    const packageDir = path.join(tempDir, 'package');
-    const files = fs.readdirSync(packageDir);
-
-    // Look for the executable file
-    let binaryName = null;
-    for (const file of files) {
-      // Skip package.json, README.md etc.
-      if (
-        file !== 'package.json' &&
-        file !== 'README.md' &&
-        !file.endsWith('.md')
-      ) {
-        binaryName = file;
-        break;
-      }
-    }
-
-    if (!binaryName) {
-      throw new Error('Could not find binary in the extracted package');
-    }
-
-    const binaryPath = path.join(packageDir, binaryName);
-
-    // Make the binary executable
-    fs.chmodSync(binaryPath, '755');
-
-    return binaryPath;
-  } catch (error) {
-    // Clean up on error
-    try {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    } catch (cleanupError) {
-      console.error('Failed to clean up temporary files:', cleanupError);
-    }
-    throw error;
-  }
+      strict: true,
+    }),
+  );
+  return tempDir;
 }
 
 /**
@@ -174,9 +192,7 @@ export async function fetchBinary(destinationPath?: string): Promise<string> {
       throw new Error('No compatible binary package found for your platform');
     }
 
-    console.log(
-      `Found matching binary: ${packageInfo.tarballUrl}`,
-    );
+    console.log(`Found matching binary: ${packageInfo.tarballUrl}`);
 
     // Download and extract the binary
     const binaryPath = await downloadAndExtractBinary(
@@ -214,4 +230,3 @@ export async function fetchBinary(destinationPath?: string): Promise<string> {
     throw error;
   }
 }
-
