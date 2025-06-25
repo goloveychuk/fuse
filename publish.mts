@@ -78,6 +78,18 @@ async function createPackageForArtifact(artifactDir, osName, arch) {
   return { packageDir, packageName, normalizedArch };
 }
 
+async function retry<T>(fn: () => Promise<T>, retries = 3, delay = 5000): Promise<T> {
+  let lastError: Error | null = null;
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error as Error;
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  throw lastError;
+}
 
 
 // Function to publish a package using npm via zx
@@ -93,7 +105,7 @@ async function publishPackage(packageInfo) {
     await $`npm publish --provenance`;
 
     // Get package details from npm registry including integrity checksum
-    const npmViewResult = await $`npm view ${packageName}@${rootPackageJson.version} --json`;
+    const npmViewResult = await retry(() => $`npm view ${packageName}@${rootPackageJson.version} --json`);
     const packageData = JSON.parse(npmViewResult.stdout.trim());
 
     // Get the tarball URL and integrity (checksum)
