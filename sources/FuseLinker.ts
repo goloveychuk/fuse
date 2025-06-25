@@ -154,9 +154,6 @@ class FuseInstaller implements Installer {
   private fuseIsSupported: Promise<boolean>;
   private mounter: Mounter;
   constructor(private opts: LinkOptions) {
-    this.indexFolderPromise = setupCopyIndex(xfs, {
-      indexPath: ppath.join(opts.project.configuration.get(`globalFolder`), `index`),
-    });
     this.mounter = getMounter(opts.report);
     this.fuseIsSupported = this.mounter.supportsFuse();
   }
