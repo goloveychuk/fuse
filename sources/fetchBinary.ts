@@ -5,13 +5,13 @@ import * as crypto from 'crypto';
 import * as https from 'https';
 import { tmpdir } from 'os';
 import { pipeline } from 'stream/promises';
-import { mkdir, mkdtemp } from 'fs/promises';
+import {  mkdtemp } from 'fs/promises';
 import * as tar from 'tar';
 
 // @ts-ignore-error
 import VERSIONS_DATA from './versions.json';
 
-import type { VersionsData, PackageInfo } from './types';
+import type { PackageInfo } from './types';
 
 /**
  * Creates a stream that downloads a file from a URL
@@ -115,7 +115,7 @@ async function downloadAndExtractTarball(
     fs.rmSync(tempDir, { recursive: true, force: true });
     throw error;
   }
-  return tempDir;
+  return path.join(tempDir, 'package');
 }
 
 
@@ -128,7 +128,7 @@ export async function fetchArtifact(packageInfo: PackageInfo): Promise<string> {
   return dirPath;
 }
 
-// downloadAndExtractBinary(
-//   'https://registry.npmjs.org/yarn-plugin-fuse-linux-arm64/-/yarn-plugin-fuse-linux-arm64-0.0.1.tgz',
-//   'sha512-jm7ZZ/JoM/WZo2wBxJVhp1sPVJx5hpBZqWaLa1xpNDwamQsWoaISXM0f9Q4xHePXfamcEGVnxyQhm7fr8TFs3Q==',
+// downloadAndExtractTarball(
+//   'https://registry.npmjs.org/yarn-plugin-fuse-linux-arm64/-/yarn-plugin-fuse-linux-arm64-0.0.4.tgz',
+//   'sha512-abkxJ9g0zH/4yslgQy/CKYo8ftRNSQIKhdQwgYB+Y+qYnwreGbrv5PRFnqZl41BzSW5sR49KurLj7s4CX/IFtA==',
 // ).then(console.log);

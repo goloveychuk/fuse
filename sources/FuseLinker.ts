@@ -150,14 +150,14 @@ const getPathNode = (start: FuseNode, path: PortablePath) => {
 
 class FuseInstaller implements Installer {
   private readonly asyncActions = new miscUtils.AsyncActions(5);
-  private readonly indexFolderPromise: Promise<PortablePath>;
+
   private fuseIsSupported: Promise<boolean>;
   private mounter: Mounter;
   constructor(private opts: LinkOptions) {
     this.indexFolderPromise = setupCopyIndex(xfs, {
       indexPath: ppath.join(opts.project.configuration.get(`globalFolder`), `index`),
     });
-    this.mounter = getMounter();
+    this.mounter = getMounter(opts.report);
     this.fuseIsSupported = this.mounter.supportsFuse();
   }
 
