@@ -114,7 +114,9 @@ jobs:
         registry-url: 'https://registry.npmjs.org'
         
     - name: Install dependencies
-      run: yarn install
+      run: |
+        corepack enable
+        yarn install
         
     - name: Download all artifacts
       uses: actions/download-artifact@v4
