@@ -119,8 +119,7 @@ func main() throws {
 
     let pid = getpid()
     print("Process ID: \(pid)")
-    // let llfs = LLFS()
-    // Initialize operations structure
+
     var operations = fuse_lowlevel_ops()
     // operations.init = ll_init
     // operations.destroy =
@@ -144,6 +143,7 @@ func main() throws {
         if !fuse_set_feature_flag(conn, UInt64(FUSE_CAP_CACHE_SYMLINKS)) {
             print("Warning: FUSE_CAP_CACHE_SYMLINKS not supported")
         }
+        context.fileSystem.start()
     }
     operations.opendir = { (req, ino, fi) in
         fi!.pointee.cache_readdir = 1
@@ -319,12 +319,13 @@ func main() throws {
             mutationsPath = optionsIter.next()
         case "--detach":
             detach = true
-        case "-d":
+        case "--debug":
             debug = true
         default:
             mountPoint = option
         }
     }
+
     guard let mountPoint = mountPoint else {
         throw MyError.badMountParams
     }
@@ -336,34 +337,28 @@ func main() throws {
         manifestPath: manifestPath, mutationsPath: mutationsPath)
     context.fileSystem = fs
 
-    // Create mount point if needed
-    let fileManager = FileManager.default
-    if !fileManager.fileExists(atPath: mountPoint) {
-        do {
-            try fileManager.createDirectory(atPath: mountPoint, withIntermediateDirectories: true)
-            print("Created mount point at \(mountPoint)")
-        } catch {
-            print("Error creating mount point: \(error)")
-            return
-        }
-    }
 
-    if debug {
-        Task.detached {
-            while true {
-                try await Task.sleep(for: .seconds(1))
-                // Read process memory from /proc/self/statm and convert from pages to MB
-                if let statm = try? String(contentsOfFile: "/proc/self/statm") {
-                    let components = statm.split(separator: " ")
-                    if components.count > 1, let rss = Double(components[1]) {
-                        let pageSize = Double(getpagesize())
-                        let memoryMB = (rss * pageSize) / (1024 * 1024)
-                        print("used memory: \(String(format: "%.2f", memoryMB)) MB")
-                    }
-                }
-            }
-        }
-    }
+    // if debug {
+        // if (detach) {
+        //     throw NSError(
+        //         domain: "FUSEError", code: 1,
+        //         userInfo: [NSLocalizedDescriptionKey: "Debug and detach are not compatible"]) // swift runtime deadlock
+        // }
+        // Task.detached {
+        //     while true {
+        //         try await Task.sleep(for: .seconds(1))
+        //         // Read process memory from /proc/self/statm and convert from pages to MB
+        //         if let statm = try? String(contentsOfFile: "/proc/self/statm") {
+        //             let components = statm.split(separator: " ")
+        //             if components.count > 1, let rss = Double(components[1]) {
+        //                 let pageSize = Double(getpagesize())
+        //                 let memoryMB = (rss * pageSize) / (1024 * 1024)
+        //                 print("used memory: \(String(format: "%.2f", memoryMB)) MB")
+        //             }
+        //         }
+        //     }
+        // }
+    // }
     
     // Prepare arguments
     let args =
@@ -413,7 +408,11 @@ func main() throws {
     }
 
     let multithreaded = false
-    fuse_daemonize(detach ? 0 : 1) //If foreground is 0, fuse_daemonize() will detach from the controlling terminal and run in the background as a system daemon. Otherwise, the process will continue to run in the foreground.
+    guard fuse_daemonize(detach ? 0 : 1) == 0 else {
+        throw NSError(
+            domain: "FUSEError", code: 4,
+            userInfo: [NSLocalizedDescriptionKey: "Failed to daemonize FUSE filesystem"])
+    }
     var ret: Int32 = 0
     // if multithreaded {
     // let max_threads: UInt32 = 4
@@ -438,5 +437,9 @@ func main() throws {
     // print("FUSE filesystem exited with status: \(result)")
 }
 
-// Start the filesystem
-try main()
+do {
+    try main()
+} catch {
+    print("Error: \(error)")
+    exit(1)
+}

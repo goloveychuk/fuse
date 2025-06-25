@@ -163,6 +163,9 @@ public final class FileSystem: Sendable {
         let visitor = Visitor(depTree: depTree, writableConfig: writableConfig)
         self.rootNodes = visitor.rootNodes
         self.zipCache = visitor.zipCache
+    }
+
+    public func start() {
         startCleaningWorker()
     }
 
