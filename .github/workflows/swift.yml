@@ -80,7 +80,11 @@ jobs:
         sudo apt install -y meson ninja-build
         ./build_libfuse.sh
 
-
+    - name: Find fusermount3 path
+      run: |
+        FUSERMOUNT3_PATH=$(which fusermount3)
+        echo "Found fusermount3 at: ${FUSERMOUNT3_PATH}"
+        echo "FUSERMOUNT3_PATH=${FUSERMOUNT3_PATH}" >> $GITHUB_ENV
     
     - name: Build
       # run: swift build --swift-sdk x86_64-swift-linux-musl
@@ -97,7 +101,9 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: fskit-${{ matrix.arch }}
-        path: fskit/.build/release/Fuse
+        path: |
+          fskit/.build/release/Fuse
+          ${{ env.FUSERMOUNT3_PATH }}
 
     # - name: Run tests
     #   run: swift test -v
