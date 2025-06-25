@@ -76,10 +76,7 @@ async function createPackageForArtifact(artifactDir, osName, arch) {
     // bin: {
     //   'yarn-fuse': `./${path.basename(binaryDestPath)}`,
     // },
-    // repository: {
-    //   type: 'git',
-    //   url: 'https://github.com/vadymh/fskit.git',
-    // },
+    repository: rootPackageJson.repository,
     publishConfig: {
       access: 'public',
     },

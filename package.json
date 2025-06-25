@@ -11,6 +11,10 @@
     "tar": "^6.2.0",
     "zx": "^7.2.3"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/goloveychuk/fskit.git"
+  },
   "devDependencies": {
     "@types/node": "^18.0.0",
     "@types/tar": "^6.1.1",
