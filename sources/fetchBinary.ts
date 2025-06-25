@@ -10,9 +10,9 @@ import * as tar from 'tar';
 import { Transform } from 'stream';
 
 //@ts-ignore-error
-import VERSIONS_DATA from './versions.json';
+// import VERSIONS_DATA from './versions.json';
 
-import { VersionsData, PackageInfo } from './types';
+import type { VersionsData, PackageInfo } from './types';
 
 /**
  * Creates a stream that downloads a file from a URL
@@ -73,8 +73,6 @@ function createHashCheckStream(expectedIntegrity: string) {
   return transformStream;
 }
 
-
-
 /**
  * Gets the appropriate binary package info for current platform
  */
@@ -115,55 +113,8 @@ function getPackageInfoForPlatform(
   return matchingPackage;
 }
 
-async function verifyIntegrityOrThrow(
-  filePath: string,
-  expectedIntegrity: string,
-) {
-  const [algorithm, expectedHashBase64] = expectedIntegrity.split('-');
-  if (!algorithm || !expectedHashBase64) {
-    throw new Error(`Invalid integrity format: ${expectedIntegrity}`);
-  }
 
-  // Remove any URL-safe base64 adjustments and convert to Buffer
-  const expectedHash = Buffer.from(expectedHashBase64, 'base64');
-
-  const hash = crypto.createHash(algorithm);
-  const stream = fs.createReadStream(filePath);
-  await pipeline(stream, hash);
-
-  if (Buffer.compare(hash.digest(), expectedHash) !== 0) {
-    throw new Error(`Checksum mismatch for ${filePath}`);
-  }
-}
-
-function downloadFileStream(url: string, dest: string) {
-  const tmpPath = path.join(os.tmpdir(), crypto.randomUUID());
-  return new Promise<void>((resolve, reject) => {
-    const file = fs.createWriteStream(tmpPath);
-    const req = https.get(url, (res) => {
-      res.pipe(file);
-      file.on('finish', () => {
-        file.close();
-        fs.rename(tmpPath, dest, (err) => {
-          if (err) {
-            reject(err);
-          } else {
-            resolve();
-          }
-        });
-      });
-    });
-    req.on('error', (err) => {
-      reject(err);
-    });
-    req.end();
-  });
-}
-
-async function downloadAndExtractBinary(
-  tarballUrl: string,
-  integrity: string,
-) {
+async function downloadAndExtractBinary(tarballUrl: string, integrity: string) {
   // Create a temporary directory for the download
   const tempDir = await mkdtemp(path.join(tmpdir(), 'fskit-binary-'));
   await pipeline(
@@ -230,3 +181,8 @@ export async function fetchBinary(destinationPath?: string): Promise<string> {
     throw error;
   }
 }
+
+downloadAndExtractBinary(
+  'https://registry.npmjs.org/yarn-plugin-fuse-linux-arm64/-/yarn-plugin-fuse-linux-arm64-0.0.1.tgz',
+  'sha512-jm7ZZ/JoM/WZo2wBxJVhp1sPVJx5hpBZqWaLa1xpNDwamQsWoaISXM0f9Q4xHePXfamcEGVnxyQhm7fr8TFs3Q==',
+).then(console.log);
