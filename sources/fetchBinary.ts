@@ -8,7 +8,7 @@ import { pipeline } from 'stream/promises';
 import { mkdir, mkdtemp } from 'fs/promises';
 import * as tar from 'tar';
 
-//@ts-expect-error
+//@ts-ignore-error
 import VERSIONS_DATA from './versions.json';
 
 import { VersionsData, PackageInfo } from './types';

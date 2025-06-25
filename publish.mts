@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+// #!/usr/bin/env node
 
 /**
  * FSKit Publishing Script
@@ -47,32 +47,14 @@ async function createPackageForArtifact(artifactDir, osName, arch) {
 
   console.log(`Creating package: ${packageName}@${rootPackageJson.version}`);
 
-  // Create a directory for the package
-  const packageDir = path.join(rootDir, 'tmp-packages', packageName);
-  fs.mkdirSync(packageDir, { recursive: true });
+  const packageDir = artifactDir;
 
-  // Find the Fuse binary in the artifact directory
-  const fuseBinary = findFuseBinary(artifactDir);
-  if (!fuseBinary) {
-    console.error(`No Fuse binary found in ${artifactDir}`);
-    return null;
-  }
-
-  // Copy the binary to the package directory
-  const binaryDestPath = path.join(packageDir, path.basename(fuseBinary));
-  fs.copyFileSync(fuseBinary, binaryDestPath);
-
-  // Make the binary executable
-  fs.chmodSync(binaryDestPath, '755');
-
-  // Create package.json for the package
   const packageConfig = {
     name: packageName,
     version: rootPackageJson.version,
     description: `FSKit Fuse binary for ${osName} on ${normalizedArch}`,
     os: [osName],
     cpu: [normalizedArch],
-    files: [path.basename(binaryDestPath)],
     // bin: {
     //   'yarn-fuse': `./${path.basename(binaryDestPath)}`,
     // },
@@ -96,23 +78,7 @@ async function createPackageForArtifact(artifactDir, osName, arch) {
   return { packageDir, packageName, normalizedArch };
 }
 
-// Function to find Fuse binary in the artifact directory
-function findFuseBinary(artifactDir) {
-  // Look for the Fuse binary in the artifact directory
-  const files = fs.readdirSync(artifactDir);
 
-  // First look for exact match
-  if (files.includes('Fuse')) {
-    return path.join(artifactDir, 'Fuse');
-  }
-
-  // Then look for any file (should be the binary)
-  if (files.length > 0) {
-    return path.join(artifactDir, files[0]);
-  }
-
-  return null;
-}
 
 // Function to publish a package using npm via zx
 async function publishPackage(packageInfo) {
