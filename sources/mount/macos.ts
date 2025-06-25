@@ -112,6 +112,10 @@ export class MacosMounter implements Mounter {
       'Library/Group Containers/group.com.apple.fskit.settings/enabledModules.plist',
     );
 
+    if (!fs.existsSync(enabledModules)) {
+      return false;
+    }
+
     const enabledModulesPlist = parse(fs.readFileSync(enabledModules, 'utf8'));
 
     return enabledModulesPlist.includes(CONSTANTS.extensionId);

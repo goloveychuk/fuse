@@ -97,3 +97,34 @@ jobs:
 
     # - name: Run tests
     #   run: swift test -v
+    
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # Only run on master branch and not on pull requests todo on release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '23'
+        registry-url: 'https://registry.npmjs.org'
+        
+    - name: Install dependencies
+      run: npm ci
+        
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+        
+    - name: List downloaded artifacts
+      run: ls -la artifacts
+      
+    - name: Run publish script
+      run: node publish.mts
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
