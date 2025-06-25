@@ -2733,6 +2733,8 @@ __metadata:
     tar: "npm:^6.2.0"
     typescript: "npm:^5.0.0"
     zx: "npm:^7.2.3"
+  bin:
+    yarn-plugin-fuse: ./installer.mjs
   languageName: unknown
   linkType: soft
 

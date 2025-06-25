@@ -17,14 +17,14 @@
     "url": "https://github.com/goloveychuk/fuse.git"
   },
   "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/tar": "^6.1.1",
     "@yarnpkg/builder": "^4.0.0",
     "@yarnpkg/cli": "^4.0.0",
     "@yarnpkg/core": "^4.0.0",
     "execa": "^8.0.1",
     "fast-plist": "^0.1.3",
     "tar": "^6.2.0",
-    "@types/node": "^18.0.0",
-    "@types/tar": "^6.1.1",
     "typescript": "^5.0.0"
   },
   "scripts": {

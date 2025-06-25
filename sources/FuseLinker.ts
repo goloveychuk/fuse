@@ -459,7 +459,7 @@ class FuseInstaller implements Installer {
     const mountRoot = getStoreLocation(this.opts.project, { unplugged: false });
     const fuseIsSupported = await this.fuseIsSupported;
     let unmountPromise: Promise<void> | null = null;
-    if (fuseIsSupported) {
+    if (fuseIsSupported && xfs.existsSync(mountRoot)) {
       unmountPromise = this.mounter.unmount(mountRoot); //todo run it sooner
     }
 

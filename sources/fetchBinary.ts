@@ -61,9 +61,7 @@ function createHashCheckStream(expectedIntegrity: string) {
 /**
  * Gets the appropriate binary package info for current platform
  */
-function getPackageInfoForPlatform(
-  versionsData: VersionsData,
-): PackageInfo | null {
+export function getPackageInfoForPlatform(): PackageInfo | null {
   // Get current platform details
   const platform = os.platform();
   const arch = os.arch();
@@ -86,7 +84,7 @@ function getPackageInfoForPlatform(
   }
 
   // Find matching package in the versions data
-  const matchingPackage = versionsData.packages.find(
+  const matchingPackage = VERSIONS_DATA.packages.find(
     (pkg: PackageInfo) => pkg.os === packageOS && pkg.arch === arch,
   );
 
@@ -98,7 +96,10 @@ function getPackageInfoForPlatform(
   return matchingPackage;
 }
 
-async function downloadAndExtractBinary(tarballUrl: string, integrity: string) {
+async function downloadAndExtractTarball(
+  tarballUrl: string,
+  integrity: string,
+) {
   // Create a temporary directory for the download
   const tempDir = await mkdtemp(path.join(tmpdir(), 'fskit-binary-'));
   try {
@@ -117,58 +118,14 @@ async function downloadAndExtractBinary(tarballUrl: string, integrity: string) {
   return tempDir;
 }
 
-/**
- * Fetches the appropriate binary for the current platform
- * @param destinationPath Optional path where to place the binary, defaults to current directory
- * @returns Promise<string> Path to the downloaded binary
- */
-export async function fetchBinary(destinationPath?: string): Promise<string> {
-  try {
-    // Load versions data
 
-    // Get package info for current platform
-    const packageInfo = getPackageInfoForPlatform(VERSIONS_DATA);
-    if (!packageInfo) {
-      throw new Error('No compatible binary package found for your platform');
-    }
+export async function fetchArtifact(packageInfo: PackageInfo): Promise<string> {
+  const dirPath = await downloadAndExtractTarball(
+    packageInfo.tarballUrl,
+    packageInfo.integrity,
+  );
 
-    console.log(`Found matching binary: ${packageInfo.tarballUrl}`);
-
-    // Download and extract the binary
-    const binaryPath = await downloadAndExtractBinary(
-      packageInfo.tarballUrl,
-      packageInfo.integrity,
-    );
-
-    // Move to destination if specified
-    if (destinationPath) {
-      // Ensure destination directory exists
-      const destDir = path.dirname(destinationPath);
-      if (!fs.existsSync(destDir)) {
-        await mkdir(destDir, { recursive: true });
-      }
-
-      // Copy binary to destination
-      const binaryName = path.basename(binaryPath);
-      const finalPath = path.join(destinationPath, binaryName);
-
-      fs.copyFileSync(binaryPath, finalPath);
-      fs.chmodSync(finalPath, '755');
-
-      // Clean up temporary files
-      fs.rmSync(path.dirname(path.dirname(binaryPath)), {
-        recursive: true,
-        force: true,
-      });
-
-      return finalPath;
-    }
-
-    return binaryPath;
-  } catch (error) {
-    console.error('Failed to fetch binary:', error);
-    throw error;
-  }
+  return dirPath;
 }
 
 // downloadAndExtractBinary(

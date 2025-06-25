@@ -307,14 +307,20 @@ func main() throws {
     var mountPoint: String? = nil
     var manifestPath: String? = nil
     var mutationsPath: String? = nil
+    var detach = false
+    var debug = false
     // path = "/Users/vadymh/github/fskit/FSKitSample/example/.yarn/fuse-state.json"
     var optionsIter = CommandLine.arguments[1...].makeIterator()
     while let option = optionsIter.next() {
         switch option {
-        case "-m":
+        case "--manifest":
             manifestPath = optionsIter.next()
-        case "-u":
+        case "--upper":
             mutationsPath = optionsIter.next()
+        case "--detach":
+            detach = true
+        case "-d":
+            debug = true
         default:
             mountPoint = option
         }
@@ -341,32 +347,33 @@ func main() throws {
             return
         }
     }
-    Task.detached {
-        while true {
-            try await Task.sleep(for: .seconds(1))
-            // Read process memory from /proc/self/statm and convert from pages to MB
-            if let statm = try? String(contentsOfFile: "/proc/self/statm") {
-                let components = statm.split(separator: " ")
-                if components.count > 1, let rss = Double(components[1]) {
-                    let pageSize = Double(getpagesize())
-                    let memoryMB = (rss * pageSize) / (1024 * 1024)
-                    print("used memory: \(String(format: "%.2f", memoryMB)) MB")
+
+    if debug {
+        Task.detached {
+            while true {
+                try await Task.sleep(for: .seconds(1))
+                // Read process memory from /proc/self/statm and convert from pages to MB
+                if let statm = try? String(contentsOfFile: "/proc/self/statm") {
+                    let components = statm.split(separator: " ")
+                    if components.count > 1, let rss = Double(components[1]) {
+                        let pageSize = Double(getpagesize())
+                        let memoryMB = (rss * pageSize) / (1024 * 1024)
+                        print("used memory: \(String(format: "%.2f", memoryMB)) MB")
+                    }
                 }
             }
         }
     }
-    print("CommandLine.arguments: \(CommandLine.arguments)")
+    
     // Prepare arguments
     let args =
         [
             CommandLine.arguments[0],
-            // "-f",  // Run in foreground
-            // "-d",  // Debug output
             "-o",
             "default_permissions,auto_unmount",  //io_uring
             // "-o",
             // mountPoint,
-        ] + (mutationsPath == nil ? ["-o", "ro"] : [])
+        ] + (mutationsPath == nil ? ["-o", "ro"] : []) + (debug ? ["-d"] : [])
 
     // Convert to C-style args
     var cArgs: [UnsafeMutablePointer<Int8>?] = args.map { strdup($0) }
@@ -405,13 +412,12 @@ func main() throws {
         fuse_session_unmount(session)
     }
 
-    let foreground: Int32 = 1  //If foreground is 0, fuse_daemonize() will detach from the controlling terminal and run in the background as a system daemon. Otherwise, the process will continue to run in the foreground.
     let multithreaded = false
-    let max_threads: UInt32 = 4
-    let clone_fd: UInt32 = 1  //whether to use separate device fds for each thread (may increase performance)
-    fuse_daemonize(foreground)
+    fuse_daemonize(detach ? 0 : 1) //If foreground is 0, fuse_daemonize() will detach from the controlling terminal and run in the background as a system daemon. Otherwise, the process will continue to run in the foreground.
     var ret: Int32 = 0
     // if multithreaded {
+    // let max_threads: UInt32 = 4
+    // let clone_fd: UInt32 = 1  //whether to use separate device fds for each thread (may increase performance)
     //     let config = fuse_loop_cfg_create()
     //     fuse_loop_cfg_set_clone_fd(config, clone_fd)
     //     fuse_loop_cfg_set_max_threads(config, max_threads)

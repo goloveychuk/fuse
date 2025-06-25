@@ -19,6 +19,9 @@ async function findExistingDevice() {
     encoding: 'utf8',
     cwd: process.cwd() as PortablePath,
   });
+  if (res.code !== 0) {
+    throw new Error(`Failed to get device info: ${res.stderr}`);
+  }
   const output = res.stdout.toString();
   const plist = parse(output);
   for (const image of plist.images) {
