@@ -7,10 +7,9 @@ import { tmpdir } from 'os';
 import { pipeline } from 'stream/promises';
 import { mkdir, mkdtemp } from 'fs/promises';
 import * as tar from 'tar';
-import { Transform } from 'stream';
 
-//@ts-ignore-error
-// import VERSIONS_DATA from './versions.json';
+// @ts-ignore-error
+import VERSIONS_DATA from './versions.json';
 
 import type { VersionsData, PackageInfo } from './types';
 
@@ -172,7 +171,7 @@ export async function fetchBinary(destinationPath?: string): Promise<string> {
   }
 }
 
-downloadAndExtractBinary(
-  'https://registry.npmjs.org/yarn-plugin-fuse-linux-arm64/-/yarn-plugin-fuse-linux-arm64-0.0.1.tgz',
-  'sha512-jm7ZZ/JoM/WZo2wBxJVhp1sPVJx5hpBZqWaLa1xpNDwamQsWoaISXM0f9Q4xHePXfamcEGVnxyQhm7fr8TFs3Q==',
-).then(console.log);
+// downloadAndExtractBinary(
+//   'https://registry.npmjs.org/yarn-plugin-fuse-linux-arm64/-/yarn-plugin-fuse-linux-arm64-0.0.1.tgz',
+//   'sha512-jm7ZZ/JoM/WZo2wBxJVhp1sPVJx5hpBZqWaLa1xpNDwamQsWoaISXM0f9Q4xHePXfamcEGVnxyQhm7fr8TFs3Q==',
+// ).then(console.log);
