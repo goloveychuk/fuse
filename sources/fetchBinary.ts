@@ -45,32 +45,18 @@ function createHashCheckStream(expectedIntegrity: string) {
   if (!algorithm || !expectedHashBase64) {
     throw new Error(`Invalid integrity format: ${expectedIntegrity}`);
   }
-
-  // Remove any URL-safe base64 adjustments and convert to Buffer
   const expectedHash = Buffer.from(expectedHashBase64, 'base64');
-  const hash = crypto.createHash(algorithm);
-
-  // Create a transform stream that hashes data as it passes through
-  const transformStream = new Transform({
-    transform(
-      chunk: Buffer,
-      encoding: string,
-      callback: (error?: Error | null, data?: any) => void,
-    ) {
+  return async function* (s: NodeJS.ReadableStream) {
+    const hash = crypto.createHash(algorithm);
+    for await (const chunk of s) {
       hash.update(chunk);
-      callback(null, chunk);
-    },
-    flush(callback: (error?: Error | null, data?: any) => void) {
-      const digest = hash.digest();
-      if (Buffer.compare(digest, expectedHash) !== 0) {
-        callback(new Error(`Checksum mismatch`));
-        return;
-      }
-      callback();
-    },
-  });
-
-  return transformStream;
+      yield chunk;
+    }
+    const digest = hash.digest();
+    if (Buffer.compare(digest, expectedHash) !== 0) {
+      throw new Error(`Checksum mismatch`);
+    }
+  };
 }
 
 /**
@@ -113,18 +99,22 @@ function getPackageInfoForPlatform(
   return matchingPackage;
 }
 
-
 async function downloadAndExtractBinary(tarballUrl: string, integrity: string) {
   // Create a temporary directory for the download
   const tempDir = await mkdtemp(path.join(tmpdir(), 'fskit-binary-'));
-  await pipeline(
-    await createDownloadStream(tarballUrl),
-    createHashCheckStream(integrity),
-    tar.extract({
-      cwd: tempDir,
-      strict: true,
-    }),
-  );
+  try {
+    await pipeline(
+      await createDownloadStream(tarballUrl),
+      createHashCheckStream(integrity),
+      tar.extract({
+        cwd: tempDir,
+        strict: true,
+      }),
+    );
+  } catch (error) {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    throw error;
+  }
   return tempDir;
 }
 
