@@ -10,7 +10,7 @@ private let uid = getuid()
 private let gid = getgid()
 
 private enum RootNodeData {
-    case softLink(data: String)
+    case softLink(data: Data)
     case zip(zipInfo: ZipInfo, children: OrderedDictionary<PathSegment, RootNode>)
     case dirPortal(target: String, children: OrderedDictionary<PathSegment, RootNode>)
     case nestedDir(children: OrderedDictionary<PathSegment, RootNode>)
@@ -110,7 +110,7 @@ class Visitor {
 
         switch dependencyNode {
         case .softLink(let data):
-            nodeData = .softLink(data: data)
+            nodeData = .softLink(data: data.data(using: .utf8)!)
             break
         case .zip(let info, let children):
             let zipInfo: ZipInfo
@@ -297,9 +297,9 @@ public final class FileSystem: Sendable {
         attr.gid = gid
         attr.type = getItemType(rootNode: node, zipID: nil)
         switch node.node {
-        case .softLink(_):
-            attr.size = 1
-            attr.allocSize = 1
+        case .softLink(let data):
+            attr.size = UInt64(data.count)
+            attr.allocSize = attr.size
             attr.linkCount = 1
             attr.mode = UInt32(S_IFLNK | 0o644)  //todo get original, because there are executable
             return attr
@@ -339,8 +339,8 @@ public final class FileSystem: Sendable {
             attr.mode = UInt32(S_IFDIR | 0o755)  //todo get original
         case .symlink(let entryInd):
             let zipEntry = try listableZip.statEntry(index: entryInd)
-            attr.size = 1
-            attr.allocSize = 1
+            attr.size = UInt64(zipEntry.size)
+            attr.allocSize = attr.size
             attr.linkCount = 1
             attr.mode = UInt32(S_IFLNK | zipEntry.permissions)
         case .file(let entryInd):
@@ -560,7 +560,7 @@ public final class FileSystem: Sendable {
             }
         } else {
             if case .softLink(let data) = nodeData.rootNode.node {
-                return FSFileName(string: data)
+                return FSFileName(data: data)
             }
         }
         throw fs_errorForPOSIXError(POSIXError.EIO)
