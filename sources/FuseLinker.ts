@@ -1,4 +1,4 @@
-import { Descriptor, FetchResult, formatUtils, Installer, InstallPackageExtraApi, Linker, LinkOptions, LinkType, Locator, LocatorHash, Manifest, MessageName, MinimalLinkOptions, Package, Project, miscUtils, structUtils, WindowsLinkType, BuildRequest } from '@yarnpkg/core';
+import { Descriptor, FetchResult, formatUtils, Installer, InstallPackageExtraApi, Linker, LinkOptions, LinkType, Locator, LocatorHash, Manifest, MessageName, MinimalLinkOptions, Package, Project, miscUtils, structUtils, WindowsLinkType, BuildRequest, IdentHash } from '@yarnpkg/core';
 import { Filename, PortablePath, setupCopyIndex, ppath, xfs, DirentNoPath, VirtualFS } from '@yarnpkg/fslib';
 import { ZipOpenFS } from '@yarnpkg/libzip';
 import { jsInstallUtils } from '@yarnpkg/plugin-pnp';
@@ -50,25 +50,153 @@ async function calculateDirHash(dirPath: string): Promise<string> {
   return crypto.createHash('sha256').update(combinedData).digest('hex');
 }
 
+class DependencyData {
+  public dependenciesLocation: PortablePath | null
+  public packageLocation: PortablePath
+  public target: PortablePath | null;
+  public locator: Locator
+  public _notPeerDepenendencies?: Map<IdentHash, Locator>;
+  public _peerDeps?: PeerDepsArray
+  constructor(data: {
+    isWorkspace: boolean;
+    target: PortablePath | null;
+    packageLocation: PortablePath;
+    locator: Locator;
+    dependenciesLocation: PortablePath | null;
+  }) {
+    this.dependenciesLocation = data.dependenciesLocation
+    this.packageLocation = data.packageLocation
+    this.target = data.target
+    this.locator = data.locator
+  }
 
-interface DependencyData {
-  isWorkspace: boolean;
-  target: PortablePath | null;
-  packageLocation: PortablePath;
-  locator: Locator;
-  dependenciesLocation: PortablePath | null;
-  dependenciesLinks?: Map<PortablePath, { locator: Locator, relative: PortablePath, absolute: PortablePath }>;
+  *iterateAllDependencies(remapping: Remapping): IterableIterator<Locator> {
+    for (const [locatorHash, dep] of this._notPeerDepenendencies!) {
+      yield remapping.get(dep.locatorHash)?.locator ?? dep
+    }
+    if (this._peerDeps) {
+      for (const mbDep of this._peerDeps.deps) {
+        if (mbDep) {
+          // yield remapping.get(mbDep.locatorHash)?.locator ?? mbDep
+          yield mbDep
+        }
+      }
+    }
+    
+  }
 }
+
+type AllDependencies = Map<LocatorHash, DependencyData>
+
+type Remapping = Map<LocatorHash, DependencyData>
+
+
 export type FuseCustomData = {
   locatorByPath: Map<PortablePath, string>;
-  allDependencies: Map<LocatorHash, DependencyData>;
+  packagePathByLocator: Map<LocatorHash, PortablePath>
 };
+
+interface PeerDepsArray {
+  deps: (Locator | undefined | null)[]
+  depsCount: number
+}
+
+function checkDepsOverlap(a: PeerDepsArray, of: PeerDepsArray) {
+  let isSuperset = false
+  const isSubset = a.deps.every((dep, ind) => {
+    if (dep == null) {
+      return true
+    }
+    if (of.deps[ind] == null) {
+      isSuperset = true
+      return true
+    }
+    return of.deps[ind]!.locatorHash === dep.locatorHash
+  })
+  if (isSubset) {
+    if (isSuperset) {
+      return 'superset'
+    } else {
+      return 'subset'
+    }
+  }
+  return 'none'
+}
+interface PeersCombined {
+  array: DependencyData[]
+  procesed: boolean
+}
+
+class PeersDedup {
+  private remapping: Remapping = new Map()
+  // this used to recursively process children and then parents, because child dep can be dedupped and change parent dedupe
+  private peerDepsToProceedMap = new Map<LocatorHash, PeersCombined>()
+  constructor(private virtualMapForDedupe: Map<LocatorHash, PeersCombined>) {
+  }
+  dedupeAndHoistDependencyArrays(deps: PeersCombined) {
+    if (deps.procesed) {
+      return
+    }
+    deps.procesed = true
+
+    deps.array.sort((a, b) => b._peerDeps!.depsCount - a._peerDeps!.depsCount)
+    const deduped: DependencyData[] = [];
+
+    outer: for (let dep of deps.array) {
+      dep._peerDeps!.deps.forEach((d, ind) => {
+        if (d == null) {
+          return
+        }
+        const peerToProceed = this.peerDepsToProceedMap.get(d.locatorHash);
+        if (peerToProceed) {
+          this.peerDepsToProceedMap.delete(d.locatorHash)
+          this.dedupeAndHoistDependencyArrays(peerToProceed)
+        }
+        const remapped = this.remapping.get(d.locatorHash);
+        if (remapped) {
+          dep._peerDeps!.deps[ind] = remapped.locator
+        }
+      })
+      for (const duppedDep of deduped) {
+        const overlap = checkDepsOverlap(dep._peerDeps!, duppedDep._peerDeps!)
+        if (overlap !== 'none') {
+          this.remapping.set(dep.locator.locatorHash, duppedDep)
+          if (overlap === 'superset') {
+            dep._peerDeps!.deps.forEach((d, ind) => {
+              if (duppedDep._peerDeps!.deps[ind] == null && d != null) {
+                duppedDep._peerDeps!.deps[ind] = d
+              }
+            })
+          }
+          continue outer
+        }
+      }
+      deduped.push(dep)
+    }
+  }
+
+  dedupePeerDeps() {
+    for (const deps of this.virtualMapForDedupe.values()) {
+      for (const dep of deps.array) {
+        if (this.peerDepsToProceedMap.has(dep.locator.locatorHash)) {
+          throw new Error('Unexpected duplicate in virtualMapForDedupe')
+        }
+        this.peerDepsToProceedMap.set(dep.locator.locatorHash, deps)
+      }
+    }
+    for (const deps of this.virtualMapForDedupe.values()) {
+      this.dedupeAndHoistDependencyArrays(deps)
+    }
+    return this.remapping
+  }
+}
+
 
 export class FuseLinker implements Linker {
   getCustomDataKey() {
     return JSON.stringify({
       name: `FuseLinker`,
-      version: 1,
+      version: 2,
     });
   }
 
@@ -85,11 +213,11 @@ export class FuseLinker implements Linker {
     if (!customData)
       throw new UsageError(`The project in ${formatUtils.pretty(opts.project.configuration, `${opts.project.cwd}/package.json`, formatUtils.Type.PATH)} doesn't seem to have been installed - running an install there might help`);
 
-    const packagePaths = customData.allDependencies.get(locator.locatorHash);
-    if (typeof packagePaths === `undefined`)
+    const packageLocation = customData.packagePathByLocator.get(locator.locatorHash);
+    if (typeof packageLocation === `undefined`)
       throw new UsageError(`Couldn't find ${structUtils.prettyLocator(opts.project.configuration, locator)} in the currently installed fuse map - running an install might help`);
 
-    return packagePaths.packageLocation;
+    return packageLocation;
   }
 
   async findPackageLocator(location: PortablePath, opts: LinkOptions): Promise<Locator | null> {
@@ -97,15 +225,15 @@ export class FuseLinker implements Linker {
       return null;
 
     const customDataKey = this.getCustomDataKey();
-    const customData = opts.project.linkersCustomData.get(customDataKey) as any;
+    const customData = opts.project.linkersCustomData.get(customDataKey) as FuseCustomData | undefined
     if (!customData)
       throw new UsageError(`The project in ${formatUtils.pretty(opts.project.configuration, `${opts.project.cwd}/package.json`, formatUtils.Type.PATH)} doesn't seem to have been installed - running an install there might help`);
 
     const nmRootLocation = location.match(/(^.*\/node_modules\/(@[^/]*\/)?[^/]+)(\/.*$)/);
     if (nmRootLocation) {
-      const nmLocator = customData.locatorByPath.get(nmRootLocation[1]);
+      const nmLocator = customData.locatorByPath.get(nmRootLocation[1] as PortablePath);
       if (nmLocator) {
-        return nmLocator;
+        return structUtils.parseLocator(nmLocator)
       }
     }
 
@@ -117,7 +245,7 @@ export class FuseLinker implements Linker {
 
       const locator = customData.locatorByPath.get(currentPath);
       if (locator) {
-        return locator;
+        return structUtils.parseLocator(locator);
       }
     } while (nextPath !== currentPath);
 
@@ -159,9 +287,11 @@ class FuseInstaller implements Installer {
   }
 
   private customData: FuseCustomData = {
-    allDependencies: new Map(),
     locatorByPath: new Map(),
-  };
+    packagePathByLocator: new Map()
+  }
+  private allDependencies: AllDependencies = new Map();
+
 
   attachCustomData(customData: any) {
     // We don't want to attach the data because it's only used in the Linker and we'll recompute it anyways in the Installer,
@@ -170,12 +300,21 @@ class FuseInstaller implements Installer {
 
   async installPackage(pkg: Package, fetchResult: FetchResult, api: InstallPackageExtraApi) {
     // console.log('installPackage', structUtils.stringifyLocator(pkg));
+    let res: { packageLocation: PortablePath, buildRequest: BuildRequest | null };
     switch (pkg.linkType) {
-      case LinkType.SOFT: return this.installPackageSoft(pkg, fetchResult, api);
-      case LinkType.HARD: return this.installPackageHard(pkg, fetchResult, api);
+      case LinkType.SOFT: {
+        res = await this.installPackageSoft(pkg, fetchResult, api);
+        break
+      }
+      case LinkType.HARD: {
+        res = await this.installPackageHard(pkg, fetchResult, api);
+        break
+      }
+      default:
+        throw new Error(`Assertion failed: Unsupported package link type`);
     }
-
-    throw new Error(`Assertion failed: Unsupported package link type`);
+    this.customData.packagePathByLocator.set(pkg.locatorHash, res.packageLocation)
+    return res
   }
 
   private async installPackageSoft(pkg: Package, fetchResult: FetchResult, api: InstallPackageExtraApi) {
@@ -186,13 +325,13 @@ class FuseInstaller implements Installer {
       ? ppath.join(packageLocation, Filename.nodeModules)
       : null;
 
-    this.customData.allDependencies.set(pkg.locatorHash, {
+    this.allDependencies.set(pkg.locatorHash, new DependencyData({
       packageLocation,
       dependenciesLocation,
       isWorkspace,
       target: null,
       locator: pkg,
-    });
+    }));
 
     return {
       packageLocation,
@@ -203,7 +342,6 @@ class FuseInstaller implements Installer {
   private async installPackageHard(pkg: Package, fetchResult: FetchResult, api: InstallPackageExtraApi) {
     const isVirtual = structUtils.isVirtualLocator(pkg);
     const devirtualizedLocator: Locator = isVirtual ? structUtils.devirtualizeLocator(pkg) : pkg;
-
     const buildConfig = {
       manifest: await Manifest.tryFind(fetchResult.prefixPath, { baseFs: fetchResult.packageFs }) ?? new Manifest(),
       misc: {
@@ -223,12 +361,12 @@ class FuseInstaller implements Installer {
       realPath = VirtualFS.resolveVirtual(realPath);
     }
 
-    this.customData.allDependencies.set(pkg.locatorHash, {
+    this.allDependencies.set(pkg.locatorHash, new DependencyData({
       ...packagePaths,
       isWorkspace: false,
       locator: pkg,
       target: xfs.existsSync(realPath) ? ppath.join(realPath, fetchResult.prefixPath) : null // for conditional dependencies
-    });
+    }));
 
     // api.holdFetchResult(this.asyncActions.set(pkg.locatorHash, async () => {
     //   await xfs.mkdirPromise(packageLocation, {recursive: true});
@@ -253,46 +391,69 @@ class FuseInstaller implements Installer {
     };
   }
 
-  private getAllHoistedDependencies() {
-      const visited = new Set<LocatorHash>()
+  // private getAllHoistedDependencies() {
+  //   const visited = new Set<LocatorHash>()
 
-      // const toVisit = [this.opts.project.topLevelWorkspace.anchoredLocator.locatorHash]
-      const toVisit = [...this.opts.project.workspaces.map(w => w.anchoredLocator.locatorHash)]
+  //   // const toVisit = [this.opts.project.topLevelWorkspace.anchoredLocator.locatorHash]
+  //   const toVisit = [...this.opts.project.workspaces.map(w => w.anchoredLocator.locatorHash)]
 
-      const hoisted = new Map<string, DependencyData>()
+  //   const hoisted = new Map<string, DependencyData>()
 
-      while (toVisit.length) {
-        const current = toVisit.pop()!
-        if (visited.has(current)) {
-          continue
-        }
-        visited.add(current)
+  //   while (toVisit.length) {
+  //     const current = toVisit.pop()!
+  //     if (visited.has(current)) {
+  //       continue
+  //     }
+  //     visited.add(current)
 
-        const data = this.customData.allDependencies.get(current) //probably disabled
-        if (!data) {
-          continue
-        }
-        const dependencyName = structUtils.stringifyIdent(data.locator)
-        if (hoisted.has(dependencyName)) { //we skip deps here, sure?
-          continue
-        }
-        if (!data.isWorkspace ) {
-          hoisted.set(dependencyName, data)
-        }
+  //     const data = this.customData.allDependencies.get(current) //probably disabled
+  //     if (!data) {
+  //       continue
+  //     }
+  //     const dependencyName = structUtils.stringifyIdent(data.locator)
+  //     if (hoisted.has(dependencyName)) { //we skip deps here, sure?
+  //       continue
+  //     }
+  //     if (!data.isWorkspace) {
+  //       hoisted.set(dependencyName, data)
+  //     }
 
-        // console.log('current', this.customData.allDependencies)
-        if (data.dependenciesLinks) {
-          for (const dep of data.dependenciesLinks.values()) {
-              if (visited.has(dep.locator.locatorHash)) {
-                continue
-              }
-              // const depName = structUtils.stringifyIdent(dep.locator)
-              toVisit.push(dep.locator.locatorHash)
-          }
-        }
-      }
-      // console.log('hoisted', [...hoisted.keys()])
-      return hoisted
+  //     // console.log('current', this.customData.allDependencies)
+  //     if (data.dependenciesLinks) {
+  //       for (const dep of data.dependenciesLinks.values()) {
+  //         if (visited.has(dep.locator.locatorHash)) {
+  //           continue
+  //         }
+  //         // const depName = structUtils.stringifyIdent(dep.locator)
+  //         toVisit.push(dep.locator.locatorHash)
+  //       }
+  //     }
+  //   }
+  //   // console.log('hoisted', [...hoisted.keys()])
+  //   return hoisted
+  // }
+  virtualMapForDedupe = new Map<LocatorHash, PeersCombined>()
+
+  private getDependencyLink(dependencyData: DependencyData, dependency: Locator) {
+    // Downgrade virtual workspaces (cf isPnpmVirtualCompatible's documentation)
+    let targetDependency = dependency;
+    if (!isPnpmVirtualCompatible(dependency, { project: this.opts.project })) {
+      this.opts.report.reportWarningOnce(MessageName.UNNAMED, `The fuse linker doesn't support providing different versions to workspaces' peer dependencies`);
+      targetDependency = structUtils.devirtualizeLocator(dependency);
+    }
+
+    const depSrcPaths = this.allDependencies.get(targetDependency.locatorHash);
+    if (typeof depSrcPaths === `undefined`)
+      throw new Error(`Assertion failed: Expected the package to have been registered (${structUtils.stringifyLocator(dependency)})`);
+
+    const name = structUtils.stringifyIdent(dependency) as PortablePath;
+    const depDstPath = ppath.join(dependencyData.dependenciesLocation!, name);
+
+    const depLinkPath = ppath.relative(ppath.dirname(depDstPath), depSrcPaths.packageLocation);
+
+    return {
+      name, relative: depLinkPath, absolute: depSrcPaths.packageLocation,
+    }
   }
 
   async attachInternalDependencies(locator: Locator, dependencies: Array<[Descriptor, Locator]>) {
@@ -303,9 +464,10 @@ class FuseInstaller implements Installer {
     if (!isPnpmVirtualCompatible(locator, { project: this.opts.project }))
       return;
 
-    const dependencyData = this.customData.allDependencies.get(locator.locatorHash);
+    const dependencyData = this.allDependencies.get(locator.locatorHash);
     if (typeof dependencyData === `undefined`)
       throw new Error(`Assertion failed: Expected the package to have been registered (${structUtils.stringifyLocator(locator)})`);
+
 
     const {
       dependenciesLocation,
@@ -314,38 +476,48 @@ class FuseInstaller implements Installer {
     if (!dependenciesLocation)
       return;
 
-    dependencyData.dependenciesLinks = new Map();
 
-    const installDependency = (descriptor: Descriptor, dependency: Locator) => {
-      // Downgrade virtual workspaces (cf isPnpmVirtualCompatible's documentation)
-      let targetDependency = dependency;
-      if (!isPnpmVirtualCompatible(dependency, { project: this.opts.project })) {
-        this.opts.report.reportWarningOnce(MessageName.UNNAMED, `The fuse linker doesn't support providing different versions to workspaces' peer dependencies`);
-        targetDependency = structUtils.devirtualizeLocator(dependency);
+    const realDepsMap = new Map(dependencies.map(([desc, loc]) => [desc.identHash, loc]));
+
+    const  hasExplicitSelfDependency = realDepsMap.has(locator.identHash)
+
+    if (structUtils.isVirtualLocator(locator)) {
+
+      const pkg = this.opts.project.storedPackages.get(locator.locatorHash);
+      if (!pkg) {
+        throw new Error(`Assertion failed: Expected the package to have been registered (${structUtils.stringifyLocator(locator)})`);
       }
+      const orig = structUtils.devirtualizeLocator(locator);
 
-      const depSrcPaths = this.customData.allDependencies.get(targetDependency.locatorHash);
-      if (typeof depSrcPaths === `undefined`)
-        throw new Error(`Assertion failed: Expected the package to have been registered (${structUtils.stringifyLocator(dependency)})`);
+      let depsCount = 0;
 
-      const name = structUtils.stringifyIdent(descriptor) as PortablePath;
-      const depDstPath = ppath.join(dependenciesLocation, name);
-
-      const depLinkPath = ppath.relative(ppath.dirname(depDstPath), depSrcPaths.packageLocation);
-
-      dependencyData.dependenciesLinks!.set(name, { relative: depLinkPath, absolute: depSrcPaths.packageLocation, locator: targetDependency });
+      const deps: PeerDepsArray['deps'] = []
+      for (const identHash of pkg.peerDependencies.keys()) { //assumption is that peerDependencies has same sorting for all virtual deps
+        const realDep = realDepsMap.get(identHash)
+        deps.push(realDep)
+        if (realDep) {
+          realDepsMap.delete(identHash)
+          depsCount += 1
+        }
+        
+      }
+      dependencyData._peerDeps = {
+        deps,
+        depsCount,
+      }
+      if (!this.virtualMapForDedupe.has(orig.locatorHash)) {
+        this.virtualMapForDedupe.set(orig.locatorHash, { array: [], procesed: false })
+      }
+      this.virtualMapForDedupe.get(orig.locatorHash)!.array.push(dependencyData)
     }
 
-    let hasExplicitSelfDependency = false;
-    for (const [descriptor, dependency] of dependencies) {
-      if (descriptor.identHash === locator.identHash)
-        hasExplicitSelfDependency = true;
 
-      installDependency(descriptor, dependency);
+
+
+    if (!hasExplicitSelfDependency && !this.opts.project.tryWorkspaceByLocator(locator)) {
+      realDepsMap.set(locator.identHash, locator)
     }
-
-    if (!hasExplicitSelfDependency && !this.opts.project.tryWorkspaceByLocator(locator))
-      installDependency(structUtils.convertLocatorToDescriptor(locator), locator);
+    dependencyData._notPeerDepenendencies = realDepsMap
 
   }
 
@@ -379,7 +551,7 @@ class FuseInstaller implements Installer {
 
   }
 
-  private async persistHardDependency(defaultFsLayer: VirtualFS, dependencyData: DependencyData) {
+  private async persistHardDependency(defaultFsLayer: VirtualFS, dependencyData: DependencyData, remapping: Remapping) {
     await xfs.mkdirPromise(dependencyData.packageLocation, { recursive: true });
     if (dependencyData.target) {
       const dirIsValid = await this.isPackageValid(dependencyData)
@@ -407,7 +579,8 @@ class FuseInstaller implements Installer {
 
     const concurrentPromises: Array<Promise<void>> = [];
 
-    for (const [name, { absolute, relative }] of dependencyData.dependenciesLinks!) {
+    for (const dep of dependencyData.iterateAllDependencies(remapping)) {
+      const { name, relative, absolute } = this.getDependencyLink(dependencyData, dep)
       const depDstPath = ppath.join(dependencyData.dependenciesLocation, name);
 
       const existing = extraneous.get(name);
@@ -435,6 +608,9 @@ class FuseInstaller implements Installer {
   }
 
   async finalizeInstall() {
+    // console.time('peers dedupe')
+    const remapping = new PeersDedup(this.virtualMapForDedupe).dedupePeerDeps()
+    // console.timeEnd('peers dedupe')
     const fuseData: FuseNode = {
       children: {},
       linkType: 'HARD',
@@ -460,14 +636,18 @@ class FuseInstaller implements Installer {
       unmountPromise = this.mounter.unmount(mountRoot); //todo run it sooner
     }
 
-    for (const [locatorHash, dependencyData] of this.customData.allDependencies) {
+    for (const [locatorHash, dependencyData] of this.allDependencies) {
+      if (remapping.has(locatorHash)) {
+        // it's was deduped. We don't need to persist it
+        continue
+      }
       let relative = ppath.relative(mountRoot, dependencyData.packageLocation);
 
       if (relative.startsWith(`..`)) {
         // this is all packages which are outside mountroot. Which is 
         //  hacky but works
         this.asyncActions.set(locatorHash, async () => {
-          await this.persistHardDependency(defaultFsLayer, dependencyData);
+          await this.persistHardDependency(defaultFsLayer, dependencyData, remapping);
         });
         continue
       }
@@ -498,8 +678,9 @@ class FuseInstaller implements Installer {
         }
 
         const nodeModulesNode = getPathNode(fuseData, relative)
-        for (const [name, link] of dependencyData.dependenciesLinks!) {
-          const node = getPathNode(nodeModulesNode, name)
+        for (const dep of dependencyData.iterateAllDependencies(remapping)) {
+          const link = this.getDependencyLink(dependencyData, dep)
+          const node = getPathNode(nodeModulesNode, link.name)
           assign(node, {
             children: {},
             linkType: 'SOFT',
@@ -543,7 +724,7 @@ class FuseInstaller implements Installer {
         extraneous = new Set();
       }
 
-      for (const { dependenciesLocation } of this.customData.allDependencies.values()) {
+      for (const { dependenciesLocation } of this.allDependencies.values()) {
         if (!dependenciesLocation)
           continue;
 
