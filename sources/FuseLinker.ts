@@ -55,7 +55,7 @@ class DependencyData {
   public packageLocation: PortablePath
   public target: PortablePath | null;
   public locator: Locator
-  public _notPeerDepenendencies?: Map<IdentHash, Locator>;
+  public _notPeerDepenendencies?: Map<IdentHash, Dependency>;
   public _peerDeps?: PeerDepsArray
   constructor(data: {
     isWorkspace: boolean;
@@ -70,19 +70,32 @@ class DependencyData {
     this.locator = data.locator
   }
 
-  *iterateAllDependencies(remapping: Remapping): IterableIterator<Locator> {
-    for (const [locatorHash, dep] of this._notPeerDepenendencies!) {
-      yield remapping.get(dep.locatorHash)?.locator ?? dep
-    }
-    if (this._peerDeps) {
-      for (const mbDep of this._peerDeps.deps) {
-        if (mbDep) {
-          // yield remapping.get(mbDep.locatorHash)?.locator ?? mbDep
-          yield mbDep
+  *iterateAllDependencies(remapping: Remapping): IterableIterator<Dependency> {
+    for (const [_, dep] of this._notPeerDepenendencies!) {
+      const remappedDependency = remapping.get(dep.locator.locatorHash)
+      if (remappedDependency) {
+        yield {
+          descriptor: dep.descriptor,
+          locator: remappedDependency.locator,
         }
+      } else {
+        yield dep
       }
     }
-    
+    if (this._peerDeps) {
+      let ind = 0
+      for (const [_, descriptor] of this._peerDeps._peerDepenenencies) {
+        const mbDep = this._peerDeps.deps[ind]
+        if (mbDep) {
+          yield {
+            descriptor,
+            locator: mbDep,
+          }
+        }
+        ind += 1
+      }
+    }
+
   }
 }
 
@@ -98,6 +111,7 @@ export type FuseCustomData = {
 
 interface PeerDepsArray {
   deps: (Locator | undefined | null)[]
+  _peerDepenenencies: Map<IdentHash, Descriptor>
   depsCount: number
 }
 
@@ -125,6 +139,11 @@ function checkDepsOverlap(a: PeerDepsArray, of: PeerDepsArray) {
 interface PeersCombined {
   array: DependencyData[]
   procesed: boolean
+}
+
+interface Dependency {
+  locator: Locator
+  descriptor: Descriptor
 }
 
 class PeersDedup {
@@ -283,7 +302,7 @@ class FuseInstaller implements Installer {
   private mounter: Mounter;
   constructor(private opts: LinkOptions) {
     this.mounter = getMounter(opts.report);
-    this.fuseIsSupported = this.mounter.supportsFuse();
+    this.fuseIsSupported = process.env.FUSE ? this.mounter.supportsFuse() : Promise.resolve(false)
   }
 
   private customData: FuseCustomData = {
@@ -434,7 +453,7 @@ class FuseInstaller implements Installer {
   // }
   virtualMapForDedupe = new Map<LocatorHash, PeersCombined>()
 
-  private getDependencyLink(dependencyData: DependencyData, dependency: Locator) {
+  private getDependencyLink(dependencyData: DependencyData, { locator: dependency, descriptor }: Dependency) {
     // Downgrade virtual workspaces (cf isPnpmVirtualCompatible's documentation)
     let targetDependency = dependency;
     if (!isPnpmVirtualCompatible(dependency, { project: this.opts.project })) {
@@ -446,7 +465,7 @@ class FuseInstaller implements Installer {
     if (typeof depSrcPaths === `undefined`)
       throw new Error(`Assertion failed: Expected the package to have been registered (${structUtils.stringifyLocator(dependency)})`);
 
-    const name = structUtils.stringifyIdent(dependency) as PortablePath;
+    const name = structUtils.stringifyIdent(descriptor) as PortablePath;
     const depDstPath = ppath.join(dependencyData.dependenciesLocation!, name);
 
     const depLinkPath = ppath.relative(ppath.dirname(depDstPath), depSrcPaths.packageLocation);
@@ -477,9 +496,9 @@ class FuseInstaller implements Installer {
       return;
 
 
-    const realDepsMap = new Map(dependencies.map(([desc, loc]) => [desc.identHash, loc]));
+    const realDepsMap = new Map(dependencies.map(([desc, loc]) => [desc.identHash, { descriptor: desc, locator: loc }]));
 
-    const  hasExplicitSelfDependency = realDepsMap.has(locator.identHash)
+    const hasExplicitSelfDependency = realDepsMap.has(locator.identHash)
 
     if (structUtils.isVirtualLocator(locator)) {
 
@@ -494,16 +513,16 @@ class FuseInstaller implements Installer {
       const deps: PeerDepsArray['deps'] = []
       for (const identHash of pkg.peerDependencies.keys()) { //assumption is that peerDependencies has same sorting for all virtual deps
         const realDep = realDepsMap.get(identHash)
-        deps.push(realDep)
+        deps.push(realDep?.locator)
         if (realDep) {
           realDepsMap.delete(identHash)
           depsCount += 1
         }
-        
       }
       dependencyData._peerDeps = {
         deps,
         depsCount,
+        _peerDepenenencies: pkg.peerDependencies,
       }
       if (!this.virtualMapForDedupe.has(orig.locatorHash)) {
         this.virtualMapForDedupe.set(orig.locatorHash, { array: [], procesed: false })
@@ -515,7 +534,7 @@ class FuseInstaller implements Installer {
 
 
     if (!hasExplicitSelfDependency && !this.opts.project.tryWorkspaceByLocator(locator)) {
-      realDepsMap.set(locator.identHash, locator)
+      realDepsMap.set(locator.identHash, { descriptor: structUtils.convertLocatorToDescriptor(locator), locator })
     }
     dependencyData._notPeerDepenendencies = realDepsMap
 
