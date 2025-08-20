@@ -192,6 +192,13 @@ class PeersDedup {
       }
       deduped.push(dep)
     }
+    if (process.env.DEBUG_PEERS) {
+      console.log(deduped.map(d => ({
+        locator: structUtils.stringifyLocator(d.locator),
+        deps: d._peerDeps!.deps.map(d => d && structUtils.stringifyLocator(d))
+      })))
+      console.log(`was: ${deps.array.length} now: ${deduped.length}`)
+    }
   }
 
   dedupePeerDeps() {
@@ -318,22 +325,16 @@ class FuseInstaller implements Installer {
   }
 
   async installPackage(pkg: Package, fetchResult: FetchResult, api: InstallPackageExtraApi) {
-    // console.log('installPackage', structUtils.stringifyLocator(pkg));
-    let res: { packageLocation: PortablePath, buildRequest: BuildRequest | null };
     switch (pkg.linkType) {
       case LinkType.SOFT: {
-        res = await this.installPackageSoft(pkg, fetchResult, api);
-        break
+        return this.installPackageSoft(pkg, fetchResult, api);
       }
       case LinkType.HARD: {
-        res = await this.installPackageHard(pkg, fetchResult, api);
-        break
+        return this.installPackageHard(pkg, fetchResult, api);
       }
       default:
         throw new Error(`Assertion failed: Unsupported package link type`);
     }
-    this.customData.packagePathByLocator.set(pkg.locatorHash, res.packageLocation)
-    return res
   }
 
   private async installPackageSoft(pkg: Package, fetchResult: FetchResult, api: InstallPackageExtraApi) {
@@ -656,7 +657,9 @@ class FuseInstaller implements Installer {
     }
 
     for (const [locatorHash, dependencyData] of this.allDependencies) {
-      if (remapping.has(locatorHash)) {
+      const remapped = remapping.get(locatorHash)
+      this.customData.packagePathByLocator.set(locatorHash, remapped?.packageLocation ?? dependencyData.packageLocation)
+      if (remapped) {
         // it's was deduped. We don't need to persist it
         continue
       }
