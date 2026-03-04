@@ -12,6 +12,11 @@ import { getMounter, Mounter } from './mount';
 function assign(node: FuseNode, data: FuseNode) {
   Object.assign(node, data);
 }
+
+// interface HoistConfig {
+//   levels?: number
+// }
+
 const MAGIC_HASH_FILE = '.yarn-content-hash'
 
 async function calculateDirHash(dirPath: string): Promise<string> {
@@ -54,8 +59,9 @@ class DependencyData {
   public dependenciesLocation: PortablePath | null
   public packageLocation: PortablePath
   public target: PortablePath | null;
+  public isWorkspace: boolean;
   public locator: Locator
-  public _notPeerDepenendencies?: Map<IdentHash, Dependency>;
+  public _notPeerDepenendencies = new Map<IdentHash, Dependency>()
   public _peerDeps?: PeerDepsArray
   constructor(data: {
     isWorkspace: boolean;
@@ -67,11 +73,13 @@ class DependencyData {
     this.dependenciesLocation = data.dependenciesLocation
     this.packageLocation = data.packageLocation
     this.target = data.target
+    this.isWorkspace = data.isWorkspace
     this.locator = data.locator
   }
 
   *iterateAllDependencies(remapping: Remapping): IterableIterator<Dependency> {
-    for (const [_, dep] of this._notPeerDepenendencies!) {
+
+    for (const [_, dep] of this._notPeerDepenendencies) {
       const remappedDependency = remapping.get(dep.locator.locatorHash)
       if (remappedDependency) {
         yield {
@@ -82,6 +90,8 @@ class DependencyData {
         yield dep
       }
     }
+
+
     if (this._peerDeps) {
       let ind = 0
       for (const [_, descriptor] of this._peerDeps._peerDepenenencies) {
@@ -144,6 +154,25 @@ interface PeersCombined {
 interface Dependency {
   locator: Locator
   descriptor: Descriptor
+}
+
+function walkTree<T extends string>(initial: T[], fn: (node: T, depth: number) => Iterable<T> | undefined) {
+  const visited = new Set<T>()
+  const toVisit = [...initial.map(i => [i, 0] as [T, number])]
+  while (toVisit.length) {
+    const [current, depth] = toVisit.pop()!
+    visited.add(current)
+    const children = fn(current, depth)
+    if (!children) {
+      continue
+    }
+    for (const child of children) {
+      if (visited.has(child)) {
+        continue
+      }
+      toVisit.push([child, depth + 1])
+    }
+  }
 }
 
 class PeersDedup {
@@ -410,48 +439,44 @@ class FuseInstaller implements Installer {
       buildRequest,
     };
   }
+  // private hoistDependencies(remapping: Remapping, hoistConfig: HoistConfig) {
 
-  // private getAllHoistedDependencies() {
-  //   const visited = new Set<LocatorHash>()
-
-  //   // const toVisit = [this.opts.project.topLevelWorkspace.anchoredLocator.locatorHash]
-  //   const toVisit = [...this.opts.project.workspaces.map(w => w.anchoredLocator.locatorHash)]
+  //   if (hoistConfig.levels == null) {
+  //     return
+  //   } 
 
   //   const hoisted = new Map<string, DependencyData>()
 
-  //   while (toVisit.length) {
-  //     const current = toVisit.pop()!
-  //     if (visited.has(current)) {
-  //       continue
-  //     }
-  //     visited.add(current)
-
-  //     const data = this.customData.allDependencies.get(current) //probably disabled
+  //   walkTree(this.opts.project.workspaces.map(w => w.anchoredLocator.locatorHash), (current, depth) => {
+  //     const data = this.allDependencies.get(current) //probably disabled
   //     if (!data) {
-  //       continue
+  //       return
   //     }
   //     const dependencyName = structUtils.stringifyIdent(data.locator)
   //     if (hoisted.has(dependencyName)) { //we skip deps here, sure?
-  //       continue
+  //       return
   //     }
   //     if (!data.isWorkspace) {
   //       hoisted.set(dependencyName, data)
   //     }
-
-  //     // console.log('current', this.customData.allDependencies)
-  //     if (data.dependenciesLinks) {
-  //       for (const dep of data.dependenciesLinks.values()) {
-  //         if (visited.has(dep.locator.locatorHash)) {
-  //           continue
-  //         }
-  //         // const depName = structUtils.stringifyIdent(dep.locator)
-  //         toVisit.push(dep.locator.locatorHash)
-  //       }
+  //     if (depth === hoistConfig.levels! - 1) {
+  //       return
   //     }
+  //     return [...data.iterateAllDependencies(remapping)].map(d => d.locator.locatorHash)
+  //   })
+  //   let  hoistedCount = 0
+  //   const rootDep = this.allDependencies.get(this.opts.project.topLevelWorkspace.anchoredLocator.locatorHash)!;
+  //   for (const d of hoisted.values()) {
+  //     if (rootDep._notPeerDepenendencies.has(d.locator.identHash)) {
+  //       continue
+  //     }
+  //     rootDep._notPeerDepenendencies.set(d.locator.identHash, { descriptor: structUtils.convertLocatorToDescriptor(d.locator), locator: d.locator })
+  //     hoistedCount += 1
   //   }
-  //   // console.log('hoisted', [...hoisted.keys()])
-  //   return hoisted
+  //   this.opts.report.reportInfo(MessageName.UNNAMED, `Hoisted ${hoistedCount} dependencies`)
+
   // }
+
   virtualMapForDedupe = new Map<LocatorHash, PeersCombined>()
 
   private getDependencyLink(dependencyData: DependencyData, { locator: dependency, descriptor }: Dependency) {
@@ -530,9 +555,6 @@ class FuseInstaller implements Installer {
       }
       this.virtualMapForDedupe.get(orig.locatorHash)!.array.push(dependencyData)
     }
-
-
-
 
     if (!hasExplicitSelfDependency && !this.opts.project.tryWorkspaceByLocator(locator)) {
       realDepsMap.set(locator.identHash, { descriptor: structUtils.convertLocatorToDescriptor(locator), locator })
@@ -636,8 +658,11 @@ class FuseInstaller implements Installer {
       linkType: 'HARD',
     }
     // console.time('hoisted')
-    // const hoisted = this.getAllHoistedDependencies()
-    // console.timeEnd('hoisted')
+    // this.hoistDependencies(remapping, { levels: 3 }) //todo
+
+
+
+    // console.log('count', [...hoisted.keys()].length)
     // console.log('count', [...hoisted.keys()].length)
     // console.log('hoisted', [...hoisted.keys()])
 
