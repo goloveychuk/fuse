@@ -293,6 +293,11 @@ public final class FileSystem: Sendable {
             }
         }
         // "uid, modifyTime, fileID, type, mode, flags, accessTime, gid, size, birthTime, "
+        let zerotime = timespec(tv_sec: 0, tv_nsec: 0)
+        attr.modifyTime = zerotime
+        attr.flags = 0
+        attr.accessTime = zerotime
+        attr.birthTime = zerotime
         attr.uid = uid
         attr.gid = gid
         attr.type = getItemType(rootNode: node, zipID: nil)
@@ -331,6 +336,11 @@ public final class FileSystem: Sendable {
         attr.uid = uid
         attr.gid = gid
         attr.type = getItemType(rootNode: rootNode, zipID: zipId)
+        let zerotime = timespec(tv_sec: 0, tv_nsec: 0)
+        attr.modifyTime = zerotime
+        attr.flags = 0
+        attr.accessTime = zerotime
+        attr.birthTime = zerotime
         switch zipId {
         case .dir(_):
             attr.size = 0
