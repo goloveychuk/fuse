@@ -13,7 +13,7 @@ import * as os from 'os';
 import * as crypto from 'crypto';
 import { spawn } from 'child_process';
 import Module from 'module';
-import { withAtomic } from './common';
+import { withAtomic, MAGIC_HASH_FILE } from './common';
 
 const DAYS_BETWEEN_CLEANUPS = 3;
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
@@ -68,7 +68,6 @@ export class Reflinks {
   private _supported: Promise<true | string>;
 
   constructor(
-    private MAGIC_HASH_FILE: string,
     private configuration: Configuration,
     private report: Report,
     private localStoreDir: string,
@@ -182,7 +181,7 @@ export class Reflinks {
   }
 
   getGlobalPackagePath(pkgKey: string): string {
-    return path.join(Reflinks.GLOBAL_STORE, pkgKey, 'package');
+    return path.join(Reflinks.GLOBAL_STORE, pkgKey);
   }
 
   async cloneToLocal(
@@ -192,8 +191,8 @@ export class Reflinks {
     await fs.promises.mkdir(path.dirname(localPkgPath), { recursive: true });
     await callReflink(this.reflinkFile!, globalPkgPath, localPkgPath);
 
-    const globalHashFile = path.join(globalPkgPath, this.MAGIC_HASH_FILE);
-    const localHashFile = path.join(localPkgPath, this.MAGIC_HASH_FILE);
+    const globalHashFile = path.join(globalPkgPath, MAGIC_HASH_FILE);
+    const localHashFile = path.join(localPkgPath, MAGIC_HASH_FILE);
     fs.unlinkSync(localHashFile);
     fs.linkSync(globalHashFile, localHashFile);
   }
@@ -207,7 +206,7 @@ export class Reflinks {
 
     await fs.promises.writeFile(lastCleanupFile, new Date().toISOString());
 
-    const unused = await Reflinks.findUnusedPackages(this.MAGIC_HASH_FILE);
+    const unused = await Reflinks.findUnusedPackages(MAGIC_HASH_FILE);
     if (unused.length > 0) {
       this.report.reportInfo(MessageName.UNNAMED, `Reflink store: cleaning ${unused.length} unused packages`);
       Reflinks.removePackages(unused);
@@ -230,7 +229,6 @@ export class Reflinks {
       const hashFile = path.join(
         Reflinks.GLOBAL_STORE,
         entry.name,
-        'package',
         hashFileName,
       );
       try {

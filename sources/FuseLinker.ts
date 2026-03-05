@@ -18,7 +18,7 @@ function assign(node: FuseNode, data: FuseNode) {
 //   levels?: number
 // }
 
-import { MAGIC_HASH_FILE, withAtomic } from './common';
+import { MAGIC_HASH_FILE, withAtomic, PromiseOnce } from './common';
 
 async function calculateDirHash(dirPath: string): Promise<string> {
   // Get all entries in the directory
@@ -359,6 +359,7 @@ const getPathNode = (start: FuseNode, path: PortablePath) => {
 
 class FuseInstaller implements Installer {
   private readonly asyncActions = new miscUtils.AsyncActions(5);
+  private readonly globalUnpackOnce = new PromiseOnce();
 
   private fuseIsSupported: Promise<boolean>;
   private mounter: Mounter;
@@ -367,7 +368,7 @@ class FuseInstaller implements Installer {
     this.mounter = getMounter(opts.report);
     this.fuseIsSupported = process.env.FUSE ? this.mounter.supportsFuse() : Promise.resolve(false)
     const localStoreDir = getStoreLocation(opts.project, { unplugged: true });
-    this.reflinks = new Reflinks(MAGIC_HASH_FILE, opts.project.configuration, opts.report, localStoreDir);
+    this.reflinks = new Reflinks(opts.project.configuration, opts.report, localStoreDir);
   }
 
   private customData: FuseCustomData = {
@@ -617,17 +618,22 @@ class FuseInstaller implements Installer {
       if (!dirIsValid) {
         await xfs.removePromise(dependencyData.packageLocation, { recursive: true });
         if (await this.reflinks.isSupported()) {
-          const pkgKey = structUtils.slugifyLocator(dependencyData.locator);
+          const devirtualized = structUtils.isVirtualLocator(dependencyData.locator)
+            ? structUtils.devirtualizeLocator(dependencyData.locator)
+            : dependencyData.locator;
+          const pkgKey = structUtils.slugifyLocator(devirtualized);
           const globalPkgPath = this.reflinks.getGlobalPackagePath(pkgKey) as PortablePath
-          const globalDirIsValid = await isPackageDirValid(globalPkgPath)
-          if (!globalDirIsValid) {
-            await xfs.removePromise(globalPkgPath , { recursive: true }); //race condition, dont really care, it's corrupted package
-            await this.atomicUnpack(
-              defaultFsLayer,
-              dependencyData.target,
-              globalPkgPath,
-            );
-          }
+          await this.globalUnpackOnce.call(pkgKey, async () => {
+            const globalDirIsValid = await isPackageDirValid(globalPkgPath)
+            if (!globalDirIsValid) {
+              await xfs.removePromise(globalPkgPath , { recursive: true }); //race condition, dont really care, it's corrupted package
+              await this.atomicUnpack(
+                defaultFsLayer,
+                dependencyData.target as PortablePath,
+                globalPkgPath,
+              );
+            }
+          });
           await this.reflinks.cloneToLocal(
             globalPkgPath,
             dependencyData.packageLocation,

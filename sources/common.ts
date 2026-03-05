@@ -14,3 +14,16 @@ export async function withAtomic(targetDir: string, fn: (tmpDir: string) => Prom
     if (err.code !== 'ENOTEMPTY' && err.code !== 'EEXIST') throw err;
   }
 }
+
+export class PromiseOnce {
+  private inflight = new Map<string, Promise<void>>();
+
+  call(key: string, fn: () => Promise<void>): Promise<void> {
+    let p = this.inflight.get(key);
+    if (!p) {
+      p = fn();
+      this.inflight.set(key, p);
+    }
+    return p;
+  }
+}
