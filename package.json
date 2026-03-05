@@ -2,6 +2,7 @@
   "name": "yarn-plugin-fuse",
   "version": "0.0.7",
   "dependencies": {
+    "is-ci": "^2.0.0",
     "zx": "^7.2.3"
   },
   "publishConfig": {
@@ -17,6 +18,7 @@
     "url": "https://github.com/goloveychuk/fuse.git"
   },
   "devDependencies": {
+    "@reflink/reflink": "^0.1.19",
     "@types/node": "^18.0.0",
     "@types/tar": "^6.1.1",
     "@yarnpkg/builder": "^4.0.0",

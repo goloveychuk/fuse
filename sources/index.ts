@@ -2,6 +2,7 @@ import {Plugin, SettingsType} from '@yarnpkg/core';
 import {PortablePath}         from '@yarnpkg/fslib';
 
 import {FuseLinker}           from './FuseLinker';
+import CleanStoreCommand      from './commands/cleanStore';
 
 export {FuseLinker};
 
@@ -13,6 +14,9 @@ declare module '@yarnpkg/core' {
 }
 
 const plugin: Plugin = {
+  commands: [
+    CleanStoreCommand,
+  ],
   configuration: {
     fuseStoreFolder: {
       description: `By default, the store is stored in the 'node_modules/.store' of the project. Sometimes in CI scenario's it is convenient to store this in a different location so it can be cached and reused.`,

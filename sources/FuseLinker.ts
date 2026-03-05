@@ -8,6 +8,7 @@ import * as fs from 'fs/promises'
 import * as path from 'path'
 import * as crypto from 'crypto';
 import { getMounter, Mounter } from './mount';
+import { Reflinks } from './reflinks';
 
 function assign(node: FuseNode, data: FuseNode) {
   Object.assign(node, data);
@@ -17,7 +18,7 @@ function assign(node: FuseNode, data: FuseNode) {
 //   levels?: number
 // }
 
-const MAGIC_HASH_FILE = '.yarn-content-hash'
+import { MAGIC_HASH_FILE, withAtomic } from './common';
 
 async function calculateDirHash(dirPath: string): Promise<string> {
   // Get all entries in the directory
@@ -53,6 +54,31 @@ async function calculateDirHash(dirPath: string): Promise<string> {
 
   // Generate hash from combined data
   return crypto.createHash('sha256').update(combinedData).digest('hex');
+}
+
+async function isPackageDirValid(pkgDir: string): Promise<boolean> {
+  const hashFilePath = path.join(pkgDir, MAGIC_HASH_FILE);
+  try {
+    await fs.access(pkgDir);
+  } catch {
+    return false;
+  }
+
+  let expectedHash: string;
+  try {
+    expectedHash = await fs.readFile(hashFilePath, 'utf8');
+  } catch {
+    return false;
+  }
+
+  if (process.env.FORCE) {
+    const actualHash = await calculateDirHash(pkgDir);
+    if (expectedHash !== actualHash) {
+      console.warn('Reinstalling', pkgDir);
+      return false;
+    }
+  }
+  return true;
 }
 
 class DependencyData {
@@ -336,9 +362,12 @@ class FuseInstaller implements Installer {
 
   private fuseIsSupported: Promise<boolean>;
   private mounter: Mounter;
+  private reflinks: Reflinks;
   constructor(private opts: LinkOptions) {
     this.mounter = getMounter(opts.report);
     this.fuseIsSupported = process.env.FUSE ? this.mounter.supportsFuse() : Promise.resolve(false)
+    const localStoreDir = getStoreLocation(opts.project, { unplugged: true });
+    this.reflinks = new Reflinks(MAGIC_HASH_FILE, opts.project.configuration, opts.report, localStoreDir);
   }
 
   private customData: FuseCustomData = {
@@ -568,45 +597,49 @@ class FuseInstaller implements Installer {
   }
 
 
-  private async isPackageValid(dependencyData: DependencyData) {
-    const hashFilePath = ppath.join(dependencyData.packageLocation, MAGIC_HASH_FILE);
-    if (!await xfs.existsPromise(dependencyData.packageLocation)) {
-      return false
-    }
-    let expectedHash: string;
-    try {
-      expectedHash = await xfs.readFilePromise(hashFilePath, 'utf8');
-    } catch {
-      // hash is written after the package is copied, so if it doesn't exist, we assume the package is invalid
-      return false
-    }
-    if (process.env.FORCE) {
-      const existingHash = await calculateDirHash(dependencyData.packageLocation);
-      if (expectedHash === existingHash) {
-        return true
-      } else {
-        console.warn('Reinstalling', dependencyData.packageLocation);
-        return false
-      }
-    }
-    return true
-
+  private async atomicUnpack(
+    defaultFsLayer: VirtualFS,
+    target: PortablePath,
+    destPkgPath: PortablePath,
+  ): Promise<void> {
+    await withAtomic(destPkgPath, async (tmpDir) => {
+      const tmp = tmpDir as PortablePath;
+      await xfs.copyPromise(tmp, target, { baseFs: defaultFsLayer });
+      const hash = await calculateDirHash(tmp);
+      await xfs.changeFilePromise(ppath.join(tmp, MAGIC_HASH_FILE), hash);
+    });
   }
 
   private async persistHardDependency(defaultFsLayer: VirtualFS, dependencyData: DependencyData, remapping: Remapping) {
-    await xfs.mkdirPromise(dependencyData.packageLocation, { recursive: true });
     if (dependencyData.target) {
-      const dirIsValid = await this.isPackageValid(dependencyData)
+      const dirIsValid = await isPackageDirValid(dependencyData.packageLocation)
+
       if (!dirIsValid) {
         await xfs.removePromise(dependencyData.packageLocation, { recursive: true });
-        await xfs.copyPromise(dependencyData.packageLocation, dependencyData.target, {
-          baseFs: defaultFsLayer,
-        });
-        const hash = await calculateDirHash(dependencyData.packageLocation)
-        const hashFilePath = ppath.join(dependencyData.packageLocation, MAGIC_HASH_FILE);
-        await xfs.changeFilePromise(hashFilePath, hash);
+        if (await this.reflinks.isSupported()) {
+          const pkgKey = structUtils.slugifyLocator(dependencyData.locator);
+          const globalPkgPath = this.reflinks.getGlobalPackagePath(pkgKey) as PortablePath
+          const globalDirIsValid = await isPackageDirValid(globalPkgPath)
+          if (!globalDirIsValid) {
+            await xfs.removePromise(globalPkgPath , { recursive: true }); //race condition, dont really care, it's corrupted package
+            await this.atomicUnpack(
+              defaultFsLayer,
+              dependencyData.target,
+              globalPkgPath,
+            );
+          }
+          await this.reflinks.cloneToLocal(
+            globalPkgPath,
+            dependencyData.packageLocation,
+          );
+        } else {
+          await this.atomicUnpack(
+            defaultFsLayer,
+            dependencyData.target,
+            dependencyData.packageLocation,
+          );
+        }
       }
-
     }
     if (!dependencyData.dependenciesLocation) {
       return
@@ -794,6 +827,10 @@ class FuseInstaller implements Installer {
     await removeIfEmpty(storeLocation);
     if (this.opts.project.configuration.get(`nodeLinker`) !== `node-modules`)
       await removeIfEmpty(getNodeModulesLocation(this.opts.project));
+
+    if (await this.reflinks.isSupported()) {
+      await this.reflinks.cleanup();
+    }
 
     return {
       customData: this.customData,
