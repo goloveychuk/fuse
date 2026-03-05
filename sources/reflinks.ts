@@ -65,7 +65,7 @@ export class Reflinks {
   };
 
   private reflinkFile: RawReflinkFn | null = null;
-  private _supported: Promise<boolean>;
+  private _supported: Promise<true | string>;
 
   constructor(
     private MAGIC_HASH_FILE: string,
@@ -76,27 +76,36 @@ export class Reflinks {
     this._supported = this.init();
   }
 
-  isSupported(): Promise<boolean> {
-    return this._supported;
+  async isSupported(): Promise<boolean> {
+    const result = await this._supported;
+    if (result === true) {
+      this.report.reportInfoOnce(MessageName.UNNAMED, `Reflinks enabled`);
+    } else {
+      this.report.reportInfoOnce(MessageName.UNNAMED, `Reflinks disabled (${result})`);
+    }
+    return result === true;
   }
 
-  private async init(): Promise<boolean> {
-    if (process.platform !== 'darwin' || isCI) return false;
+  private async init(): Promise<true | string> {
+    if (process.platform !== 'darwin')
+      return `unsupported platform: ${process.platform}`;
+    if (isCI)
+      return `CI environment`;
 
     try {
       await fs.promises.mkdir(Reflinks.GLOBAL_STORE, { recursive: true });
       await fs.promises.mkdir(this.localStoreDir, { recursive: true });
     } catch {
-      return false;
+      return `cannot create store directories`;
     }
 
     this.reflinkFile = await this.fetchReflinkBinary();
-    if (this.reflinkFile === null) {
-      return false;
-    }
-    if (!(await this.testReflinkSupport())) {
-      return false;
-    }
+    if (this.reflinkFile === null)
+      return `failed to fetch native binary`;
+
+    if (!(await this.testReflinkSupport()))
+      return `clonefile not supported between store and node_modules`;
+
     return true;
   }
 
