@@ -8,9 +8,17 @@
 import FSKit
 import Foundation
 
+extension Logger {
+    static let passthroughfs = Logger(subsystem: "com.apple.fskit.PassthroughFS", category: "default")
+}
+
 public func fs_errorForPOSIXError(_ err: POSIXErrorCode) -> any Error {
     return fs_errorForPOSIXError(err.rawValue)
+}
 
+func createVolumeNameFromPath(_ path: String) -> FSFileName {
+    let dirName = (path as NSString).lastPathComponent
+    return FSFileName(string: dirName + "_passthrough")
 }
 
 extension FSItem.GetAttributesRequest {
@@ -40,46 +48,110 @@ struct FSKitExpExtension: UnaryFileSystemExtension {
 
 final class MyFS: FSUnaryFileSystem, FSUnaryFileSystemOperations {
 
-    private let logger = Logger(subsystem: "FSKitExp", category: "MyFS")
+    var resource: FSPathURLResource?
 
-    func probeResource(
-        resource: FSResource,
-        replyHandler: @escaping (FSProbeResult?, (any Error)?) -> Void
-    ) {
-        logger.debug("probeResource: \(resource, privacy: .public)")
-
-        replyHandler(
-            FSProbeResult.usable(
-                name: "Test1",
-                containerID: FSContainerIdentifier(uuid: Constants.containerIdentifier)
-            ),
-            nil
-        )
+    public override init() {
+        Logger.passthroughfs.debug("\(#function): init")
     }
 
-    func loadResource(
-        resource: FSResource,
-        options: FSTaskOptions,
-        replyHandler: @escaping (FSVolume?, (any Error)?) -> Void
-    ) {
-        containerStatus = .ready
-        logger.debug("loadResource: \(resource, privacy: .public)")
-        replyHandler(
-            MyFSVolume(resource: resource),
-            nil
-        )
+    /// Performs an operation to load a resource.
+    /// - Parameters:
+    ///   - resource: The resource to load.
+    ///   - options: The options to use when loading the resource.
+    ///   - replyHandler: The handler to call when load operation is complete with the volume, and any error.
+    public func loadResource(resource: FSResource, options: FSTaskOptions, replyHandler: @escaping (FSVolume?, (any Error)?) -> Void) {
+        guard let urlResource = resource as? FSPathURLResource else {
+            Logger.passthroughfs.debug("\(#function): Invalid resource type")
+            return replyHandler(nil, POSIXError(.EINVAL))
+        }
+
+        /// Handle any options present.
+        ///
+        /// This Module doesn't make use of options for loading. The only option to handle
+        /// is `-f`, and that is because this Module doesn't support formatting:
+        ///   If the force option is present and the file system doesn't support
+        ///   formatting, this method should reply with the POSIX error ENOTSUP.
+        ///
+        for opt in options.taskOptions {
+            if opt.contains("-f") {
+                return replyHandler(nil, POSIXError(.ENOTSUP))
+            }
+        }
+
+        
+        guard urlResource.url.startAccessingSecurityScopedResource() else {
+            Logger.passthroughfs.error("\(#function): Can't start accessing security scoped resource")
+            return replyHandler(nil, POSIXError(.EACCES))
+        }
+        
+        var mutationsDir: String? = nil
+        let upperDir = options.url(forOption: "u")
+        if upperDir == nil  {
+            Logger.passthroughfs.error("\(#function): No upper directory specified")
+//            return replyHandler(nil, POSIXError(.EINVAL))
+        }
+        if options.url(forOption: "-u") == nil {
+            Logger.passthroughfs.error("No upper directory specified2")
+        }
+        
+        
+        
+        
+//        guard upperDir!.startAccessingSecurityScopedResource() else {
+//            Logger.passthroughfs.error("cant start accessing upper dir")
+//            return replyHandler(nil, POSIXError(.EINVAL))
+//        }
+//        
+
+        self.resource = urlResource
+        do {
+            self.containerStatus = .ready
+            return replyHandler(try MyFSVolume(manifestPath: urlResource.url.path, mutationsPath: "/tmp"), nil)
+        } catch let error {
+            urlResource.url.stopAccessingSecurityScopedResource()
+            self.resource = nil
+            return replyHandler(nil, error)
+        }
     }
 
-    func unloadResource(
-        resource: FSResource,
-        options: FSTaskOptions,
-        replyHandler reply: @escaping ((any Error)?) -> Void
-    ) {
-        logger.debug("unloadResource: \(resource, privacy: .public)")
-        reply(nil)
+    ///  Performs an operation to unload a resource.
+    /// - Parameters:
+    ///   - resource: The resource to unload.
+    ///   - options: The options to use when unloading the resource.
+    ///   - replyHandler: The handler to call when unload is complete.
+    public func unloadResource(resource: FSResource, options: FSTaskOptions, replyHandler reply: @escaping ((any Error)?) -> Void) {
+        guard let urlResource = resource as? FSPathURLResource else {
+            Logger.passthroughfs.error("\(#function): Can't cast resource")
+            return reply(POSIXError(.EINVAL))
+        }
+        guard let loadedResource = self.resource else {
+            Logger.passthroughfs.error("\(#function): No resource was loaded")
+            return reply(POSIXError(.EINVAL))
+        }
+        guard loadedResource.url == urlResource.url else {
+            Logger.passthroughfs.error("\(#function): Invalid resource was given to unload")
+            return reply(POSIXError(.EINVAL))
+        }
+        loadedResource.url.stopAccessingSecurityScopedResource()
+        self.resource = nil
+        return reply(nil)
     }
 
-    func didFinishLoading() {
-        logger.debug("didFinishLoading")
+    /// Performs a probe operation on a resource.
+    /// - Parameters:
+    ///   - resource: The resource to probe.
+    ///   - replyHandler: The handler to call when the probe operation is complete.
+    public func probeResource(resource: FSResource, replyHandler: @escaping (FSProbeResult?, (any Error)?) -> Void) {
+        guard let urlResource = resource as? FSPathURLResource else {
+            Logger.passthroughfs.debug("\(#function): Can't cast resource")
+            return replyHandler(nil, POSIXError(.ENODEV))
+        }
+
+        let name            = createVolumeNameFromPath(urlResource.url.path())
+        let containerUUID   = NSUUID()
+        let containerIdentifier = FSContainerIdentifier(uuid: containerUUID as UUID)
+        let probeResult = FSProbeResult.usable(name: name.string ?? "", containerID: containerIdentifier)
+        return replyHandler(probeResult, nil)
     }
+
 }

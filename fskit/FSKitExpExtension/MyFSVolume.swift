@@ -84,7 +84,7 @@ extension FSItem.GetAttributesRequest {
 final class MyFSVolume: FSVolume {
     // var fd1: Int32 = -1
     var fd2: Int32 = -1
-    private let resource: FSResource
+    
     var urls: [URL?]?
     private var fs: FileSystem!
     var p: [URL?]?
@@ -92,13 +92,13 @@ final class MyFSVolume: FSVolume {
 
     private let logger = Logger(subsystem: "FSKitExp", category: "MyFSVolume")
 
-    init(resource: FSResource) {
-        self.resource = resource
-
-        super.init(
-            volumeID: FSVolume.Identifier(uuid: Constants.volumeIdentifier),
-            volumeName: FSFileName(string: "Test1")
-        )
+    
+    init(manifestPath: String, mutationsPath: String?) throws {
+        
+        self.fs = try FileSystem(manifestPath: manifestPath, mutationsPath: mutationsPath)
+        
+        super.init(volumeID: FSVolume.Identifier(uuid: Constants.volumeIdentifier), volumeName: createVolumeNameFromPath(manifestPath))
+        Logger.passthroughfs.info("\(#function): Created a new volume with ID(\(self.volumeID)) and name(\(self.name)) on path(\(manifestPath))")
     }
 }
 // extension MyFSVolume: FSVolumeKernelOffloadedIOOperations
@@ -174,64 +174,32 @@ extension MyFSVolume: FSVolume.Operations {
         return result
     }
 
-    func activate(options: FSTaskOptions) async throws -> FSItem {
-        // fd2 = open("/Users/vadymh/github/fskit/FSKitSample/test", O_RDONLY | O_DIRECTORY, 0)
-        // self.mount2 = options
-        // self.fd2 = open("/Users/vadymh/github/fskit/FSKitSample/test2", O_RDONLY | O_DIRECTORY, 0)
-        // if self.fd2 < 0 {
-        //     let error = errno
-        //     // logger.error("Failed to open directory: \(path), error: \(error)")
-        //     throw fs_errorForPOSIXError(error)
-        // }
-        self.p = [
-            options.url(forOption: "m"),
-            options.url(forOption: "d"),
-            options.url(forOption: "u"),
-        ]
-
-        // self.mount3 = options
-        var manifestPath: String? = nil
-        var mutationsPath: String? = nil
-        // path = "/Users/vadymh/github/fskit/FSKitSample/example/.yarn/fuse-state.json"
-        var optionsIter = options.taskOptions.makeIterator()
-        while let option = optionsIter.next() {
-            switch option {
-            case "-m":
-                manifestPath = optionsIter.next()
-            case "-u":
-                mutationsPath = optionsIter.next()
-            default:
-                throw MyError.badMountParams
-            }
-        }
-
-        guard let manifestPath = manifestPath else {
-            throw MyError.badMountParams
-        }
-
-        logger.debug("activate")
-
-        do {
-            self.fs = try FileSystem(manifestPath: manifestPath, mutationsPath: mutationsPath)
-            return MyFSItem(fileId: self.fs.getRootIdentifier())
-
-        } catch {
-            logger.error("Error mounting: \(error)")
-            throw error
-        }
+    public func activate(options: FSTaskOptions,
+                         replyHandler reply: @escaping (FSItem?, (any Error)?) -> Void) {
+        
+        return reply(MyFSItem(fileId: self.fs.getRootIdentifier()), nil)
     }
 
-    func deactivate(options: FSDeactivateOptions = []) async throws {
-        // resource.revoke()
-        logger.debug("deactivate")
+    /// Deactivates the volume, by closing the root item.
+    /// - Parameters:
+    ///   - options: The deactivation options.
+    ///   - replyHandler: The reply handler to invoke when the deactivation is complete.
+    public func deactivate(options: FSDeactivateOptions = [],
+                           replyHandler: @escaping ((any Error)?) -> Void) {
+//        try? self.rootItem.closeItem()
+        return replyHandler(nil)
     }
 
-    func mount(options: FSTaskOptions) async throws {
-        logger.debug("mount")
+    /// Mount in PassthroughFSVolume doesn't need to do anything; implementation just replies with nil error.
+    public func mount(options: FSTaskOptions,
+                      replyHandler: @escaping (Error?) -> Void) {
+        return replyHandler(nil)
     }
 
-    func unmount() async {
-        logger.debug("unmount")
+    /// Unmount closes the root item.
+    public func unmount(replyHandler: @escaping () -> Void) {
+//        try? self.rootItem.closeItem()
+        return replyHandler()
     }
 
     func synchronize(flags: FSSyncFlags) async throws {
