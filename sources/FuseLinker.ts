@@ -39,8 +39,12 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { getMounter, Mounter } from './mount';
 import { Reflinks } from './reflinks';
+import isCI from 'is-ci';
 import { MAGIC_HASH_FILE, withAtomic, PromiseOnce } from './common';
-import { BuildConfigCache } from './buildConfigCache';
+import {
+  BuildConfigCache,
+  ExtractBuildScriptDataRequirements,
+} from './buildConfigCache';
 
 function assign(node: FuseNode, data: FuseNode) {
   Object.assign(node, data);
@@ -50,6 +54,17 @@ interface HoistConfig {
   levels?: number;
 }
 
+async function extractBuildScriptData(fetchResult: FetchResult) {
+  return {
+    manifest:
+      (await Manifest.tryFind(fetchResult.prefixPath, {
+        baseFs: fetchResult.packageFs,
+      })) ?? new Manifest(),
+    misc: {
+      hasBindingGyp: jsInstallUtils.hasBindingGyp(fetchResult),
+    },
+  };
+}
 async function calculateDirHash(dirPath: string): Promise<string> {
   // Get all entries in the directory
   const entries = await fs.readdir(dirPath, { withFileTypes: true });
@@ -511,30 +526,30 @@ class FuseInstaller implements Installer {
     }
     const archivePathExists = xfs.existsSync(realPath);
 
-    let buildConfig =
-      await this.buildConfigCache.getCachedBuildConfig(realPath);
-    if (!buildConfig) {
-      // let packageFs = fetchResult.packageFs
-      if (archivePathExists) {
-        const packageFs = new ZipFS(realPath, {
-          customZipImplementation: JsZipImpl,
-          readOnly: true,
-        });
-        fetchResult = {
-          ...fetchResult,
-          packageFs,
-        };
+    let buildConfig: ExtractBuildScriptDataRequirements | null = null;
+
+    if (!isCI) { // because on ci we don't have any cache and don't do incremental installs
+      buildConfig = await this.buildConfigCache.getCachedBuildConfig(realPath);
+      if (!buildConfig) {
+        // let packageFs = fetchResult.packageFs
+        if (archivePathExists) {
+          const packageFs = new ZipFS(realPath, {
+            customZipImplementation: JsZipImpl,
+            readOnly: true,
+          });
+          fetchResult = {
+            ...fetchResult,
+            packageFs,
+          };
+        }
+        buildConfig = await extractBuildScriptData(fetchResult);
+        await this.buildConfigCache.writeCachedBuildConfig(
+          realPath,
+          buildConfig,
+        );
       }
-      buildConfig = {
-        manifest:
-          (await Manifest.tryFind(fetchResult.prefixPath, {
-            baseFs: fetchResult.packageFs,
-          })) ?? new Manifest(),
-        misc: {
-          hasBindingGyp: jsInstallUtils.hasBindingGyp(fetchResult),
-        },
-      };
-      await this.buildConfigCache.writeCachedBuildConfig(realPath, buildConfig);
+    } else {
+      buildConfig = await extractBuildScriptData(fetchResult);
     }
 
     const devirtualizedLocator: Locator = isVirtual
@@ -900,7 +915,9 @@ class FuseInstaller implements Installer {
       linkType: 'HARD',
     };
     // console.time('hoisted')
-    this.hoistDependencies(remapping, { levels: this.opts.project.configuration.get(`hoistLevels`) })
+    this.hoistDependencies(remapping, {
+      levels: this.opts.project.configuration.get(`hoistLevels`),
+    });
 
     // console.log('count', [...hoisted.keys()].length)
     // console.log('count', [...hoisted.keys()].length)

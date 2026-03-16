@@ -1,9 +1,8 @@
-import isCI from 'is-ci';
 import { Manifest } from '@yarnpkg/core';
 import * as fs from 'fs/promises';
 import * as crypto from 'crypto';
 
-type ExtractBuildScriptDataRequirements = {
+export type ExtractBuildScriptDataRequirements = {
   manifest: Pick<Manifest, `scripts`>;
   misc: {
     hasBindingGyp: boolean;
@@ -19,9 +18,7 @@ export class BuildConfigCache {
   async getCachedBuildConfig(
     realPath: string,
   ): Promise<ExtractBuildScriptDataRequirements | null> {
-    if (isCI) {
-      return null;
-    }
+
     try {
       const cachedBuildConfig = await fs.readFile(
         realPath + '.build-config.json',
@@ -46,10 +43,6 @@ export class BuildConfigCache {
     realPath: string,
     buildConfig: ExtractBuildScriptDataRequirements,
   ) {
-    if (isCI) {
-      return;
-    }
-
     let tmpFilePath = realPath + crypto.randomUUID();
     const json: Json = {
       scripts: Array.from(buildConfig.manifest.scripts.entries()),
