@@ -2,6 +2,7 @@ import {
   Descriptor,
   FetchResult,
   formatUtils,
+  FinalizeInstallStatus,
   Installer,
   InstallPackageExtraApi,
   Linker,
@@ -116,6 +117,7 @@ class DependencyData {
   public target: PortablePath | null;
   public isWorkspace: boolean;
   public locator: Locator;
+  public buildRequest: BuildRequest | null;
   public _notPeerDepenendencies = new Map<IdentHash, Dependency>();
   public _peerDeps?: PeerDepsArray;
   constructor(data: {
@@ -124,12 +126,14 @@ class DependencyData {
     packageLocation: PortablePath;
     locator: Locator;
     dependenciesLocation: PortablePath | null;
+    buildRequest?: BuildRequest | null;
   }) {
     this.dependenciesLocation = data.dependenciesLocation;
     this.packageLocation = data.packageLocation;
     this.target = data.target;
     this.isWorkspace = data.isWorkspace;
     this.locator = data.locator;
+    this.buildRequest = data.buildRequest ?? null;
   }
 
   *iterateAllDependencies(remapping: Remapping): IterableIterator<Dependency> {
@@ -568,6 +572,7 @@ class FuseInstaller implements Installer {
         target: archivePathExists
           ? ppath.join(realPath, fetchResult.prefixPath)
           : null, // for conditional dependencies
+        buildRequest,
       }),
     );
 
@@ -589,7 +594,7 @@ class FuseInstaller implements Installer {
 
     return {
       packageLocation,
-      buildRequest,
+      buildRequest: null,
     };
   }
   private hoistDependencies(remapping: Remapping, hoistConfig: HoistConfig) {
@@ -986,6 +991,20 @@ class FuseInstaller implements Installer {
         }
       }
     }
+
+    const records: FinalizeInstallStatus[] = [];
+    for (const [locatorHash, dependencyData] of this.allDependencies) {
+      if (dependencyData.isWorkspace) continue;
+      const buildRequest = dependencyData.buildRequest;
+      if (!buildRequest) continue;
+      if (remapping.has(locatorHash)) continue;
+      records.push({
+        locator: dependencyData.locator,
+        buildLocations: [dependencyData.packageLocation],
+        buildRequest,
+      });
+    }
+
     let promises: Promise<unknown>[] = [];
     if (fuseIsSupported) {
       const fuseStatePath = ppath.join(
@@ -1049,6 +1068,7 @@ class FuseInstaller implements Installer {
 
     return {
       customData: this.customData,
+      records,
     };
   }
 }
