@@ -74,12 +74,14 @@ export class Reflinks {
     this._supported = this.init();
   }
 
-  async isSupported(): Promise<boolean> {
+  async isSupported(dontLog?: true): Promise<boolean> {
     const result = await this._supported;
-    if (result === true) {
-      this.report.reportInfoOnce(MessageName.UNNAMED, `Reflinks enabled`);
-    } else {
-      this.report.reportInfoOnce(MessageName.UNNAMED, `Reflinks disabled (${result})`);
+    if (dontLog !== true) {
+      if (result === true) {
+        this.report.reportInfoOnce(MessageName.UNNAMED, `Reflinks enabled`);
+      } else {
+        this.report.reportInfoOnce(MessageName.UNNAMED, `Reflinks disabled (${result})`);
+      }
     }
     return result === true;
   }

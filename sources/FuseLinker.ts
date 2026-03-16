@@ -41,7 +41,6 @@ import { Reflinks } from './reflinks';
 import { MAGIC_HASH_FILE, withAtomic, PromiseOnce } from './common';
 import { BuildConfigCache } from './buildConfigCache';
 
-
 function assign(node: FuseNode, data: FuseNode) {
   Object.assign(node, data);
 }
@@ -49,7 +48,6 @@ function assign(node: FuseNode, data: FuseNode) {
 // interface HoistConfig {
 //   levels?: number
 // }
-
 
 async function calculateDirHash(dirPath: string): Promise<string> {
   // Get all entries in the directory
@@ -419,7 +417,15 @@ class FuseInstaller implements Installer {
   constructor(private opts: LinkOptions) {
     this.mounter = getMounter(opts.report);
     this.fuseIsSupported = process.env.FUSE
-      ? this.mounter.supportsFuse()
+      ? this.mounter.supportsFuse().then((supported) => {
+          if (supported) {
+            opts.report.reportInfoOnce(
+              MessageName.UNNAMED,
+              `Fuse is supported`,
+            );
+          }
+          return supported;
+        })
       : Promise.resolve(false);
     const localStoreDir = getStoreLocation(opts.project, { unplugged: true });
     this.reflinks = new Reflinks(
@@ -501,7 +507,8 @@ class FuseInstaller implements Installer {
     }
     const archivePathExists = xfs.existsSync(realPath);
 
-    let buildConfig = await this.buildConfigCache.getCachedBuildConfig(realPath);
+    let buildConfig =
+      await this.buildConfigCache.getCachedBuildConfig(realPath);
     if (!buildConfig) {
       // let packageFs = fetchResult.packageFs
       if (archivePathExists) {
@@ -886,7 +893,7 @@ class FuseInstaller implements Installer {
       baseFs: new ZipOpenFS({
         maxOpenFiles: 80,
         readOnlyArchives: true,
-        customZipImplementation: JsZipImpl
+        customZipImplementation: JsZipImpl,
       }),
     });
     // const toPersist: DependencyData[] = [];
@@ -1024,7 +1031,7 @@ class FuseInstaller implements Installer {
     if (this.opts.project.configuration.get(`nodeLinker`) !== `node-modules`)
       await removeIfEmpty(getNodeModulesLocation(this.opts.project));
 
-    if (await this.reflinks.isSupported()) {
+    if (await this.reflinks.isSupported(true)) {
       await this.reflinks.cleanup();
     }
 
