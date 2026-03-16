@@ -886,6 +886,7 @@ class FuseInstaller implements Installer {
       baseFs: new ZipOpenFS({
         maxOpenFiles: 80,
         readOnlyArchives: true,
+        customZipImplementation: JsZipImpl
       }),
     });
     // const toPersist: DependencyData[] = [];
