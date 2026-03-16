@@ -84,16 +84,11 @@ final class MyFS: FSUnaryFileSystem, FSUnaryFileSystemOperations {
             return replyHandler(nil, POSIXError(.EACCES))
         }
         
-        var mutationsDir: String? = nil
-        let upperDir = options.url(forOption: "u")
-        if upperDir == nil  {
-            Logger.passthroughfs.error("\(#function): No upper directory specified")
-//            return replyHandler(nil, POSIXError(.EINVAL))
-        }
-        if options.url(forOption: "-u") == nil {
-            Logger.passthroughfs.error("No upper directory specified2")
-        }
         
+        // guard yarnStore!.startAccessingSecurityScopedResource() else {
+        //     Logger.passthroughfs.error("\(#function): Can't start accessing security scoped yarn store")
+        //     return replyHandler(nil, POSIXError(.EACCES))
+        // }
         
         
         

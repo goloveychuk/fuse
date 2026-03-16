@@ -5,6 +5,8 @@
 //  Created by Khaos Tian on 3/30/25.
 //
 
+// https://github.com/madsmtm/objc2/blob/b43276736adfbe064bdfe6b88a765f5862897a18/examples/fskit/extension/filesystem.rs
+
 import FSKit
 import Foundation
 import os
@@ -174,10 +176,36 @@ extension MyFSVolume: FSVolume.Operations {
         return result
     }
 
-    public func activate(options: FSTaskOptions,
-                         replyHandler reply: @escaping (FSItem?, (any Error)?) -> Void) {
+    public  func activate(options: FSTaskOptions,
+                         ) async throws -> FSItem {
+
+        var storePath: String? = nil
+        var optionsIter = options.taskOptions.makeIterator()
+        while let option = optionsIter.next() {
+            switch option {
+            case "-S":
+                storePath = optionsIter.next()
+            default:
+                throw MyError.badMountParams
+            }
+        }
+
+        guard let storePath = storePath else {
+            Logger.passthroughfs.error("No store path provided")
+            throw MyError.badMountParams
+        }
+
+        // let storeURL = URL(fileURLWithPath: storePath)
+
+        // guard storeURL.startAccessingSecurityScopedResource() else {
+        //     Logger.passthroughfs.error("Can't start accessing security scoped resource for store path: \(storePath)")
+        //     throw POSIXError(.EACCES)
+        // }
+
+        // let yarnStore = options.url(forOption: "S")
+
         
-        return reply(MyFSItem(fileId: self.fs.getRootIdentifier()), nil)
+        return MyFSItem(fileId: self.fs.getRootIdentifier())
     }
 
     /// Deactivates the volume, by closing the root item.

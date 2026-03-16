@@ -1,0 +1,1 @@
+log stream --predicate 'subsystem == "com.apple.fskit.PassthroughFS"'
