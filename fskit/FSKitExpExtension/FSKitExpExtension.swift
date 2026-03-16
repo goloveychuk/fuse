@@ -64,6 +64,15 @@ final class MyFS: FSUnaryFileSystem, FSUnaryFileSystemOperations {
             Logger.passthroughfs.debug("\(#function): Invalid resource type")
             return replyHandler(nil, POSIXError(.EINVAL))
         }
+        // if options.url(forOption: "S") != nil {
+        //     Logger.passthroughfs.error("loadResource: for option url")
+        // }
+        // if options.url(forOption: "-S") != nil {
+        //     Logger.passthroughfs.error("loadResource: for option url2")
+        // }
+        // if options.url(forOption: "s") != nil {
+        //     Logger.passthroughfs.error("loadResource: for option url3")
+        // }
 
         /// Handle any options present.
         ///
@@ -98,6 +107,7 @@ final class MyFS: FSUnaryFileSystem, FSUnaryFileSystemOperations {
 //        }
 //        
 
+        // Logger.passthroughfs.error("loadResource: \(options.url(forOption: "S")?.absoluteString ?? "nil")")
         self.resource = urlResource
         do {
             self.containerStatus = .ready

@@ -201,6 +201,10 @@ extension MyFSVolume: FSVolume.Operations {
         //     Logger.passthroughfs.error("Can't start accessing security scoped resource for store path: \(storePath)")
         //     throw POSIXError(.EACCES)
         // }
+        // if options.url(forOption: "S") != nil {
+        //     Logger.passthroughfs.error("activate: for option url")
+        // }
+        
 
         // let yarnStore = options.url(forOption: "S")
 
