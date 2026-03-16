@@ -1,4 +1,3 @@
-// @ts-ignore - no type declarations for is-ci
 import isCI from 'is-ci';
 import { Configuration, tgzUtils, structUtils,Report,MessageName } from '@yarnpkg/core';
 import {
