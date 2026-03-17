@@ -774,9 +774,7 @@ class FuseInstaller implements Installer {
     // Retrieve what's currently inside the package's true nm folder. We
     // will use that to figure out what are the extraneous entries we'll
     // need to remove.
-    const initialEntries = this.isFreshInstall
-      ? new Map()
-      : await getNodeModulesListing(packagePaths.dependenciesLocation);
+    const initialEntries = await getNodeModulesListing(packagePaths.dependenciesLocation);
     const extraneous = new Map(initialEntries);
 
     const concurrentPromises: Array<Promise<void>> = [];
