@@ -24,13 +24,12 @@ import {
 import {
   Filename,
   PortablePath,
-  setupCopyIndex,
   ppath,
   xfs,
   DirentNoPath,
   VirtualFS,
 } from '@yarnpkg/fslib';
-import { ZipOpenFS, ZipFS, JsZipImpl } from '@yarnpkg/libzip';
+import { ZipFS, JsZipImpl } from '@yarnpkg/libzip';
 import { jsInstallUtils } from '@yarnpkg/plugin-pnp';
 import { UsageError } from 'clipanion';
 import { FuseNode } from './types';
@@ -190,7 +189,6 @@ class DependencyData {
   public locator: Locator;
   public _notPeerDepenendencies = new Map<IdentHash, Dependency>();
   private _packagePathes?: PackagePathes;
-  public _peerDeps?: PeerDepsArray;
   constructor(data: {
     isWorkspace: boolean;
     target: PortablePath | null;
@@ -216,19 +214,6 @@ class DependencyData {
       yield dep;
     }
 
-    if (this._peerDeps) {
-      let ind = 0;
-      for (const [_, descriptor] of this._peerDeps._peerDepenenencies) {
-        const mbDep = this._peerDeps.deps[ind];
-        if (mbDep) {
-          yield {
-            descriptor,
-            locator: mbDep,
-          };
-        }
-        ind += 1;
-      }
-    }
   }
 }
 
@@ -238,12 +223,6 @@ export type FuseCustomData = {
   locatorByPath: Map<PortablePath, string>;
   packagePathByLocator: Map<LocatorHash, PortablePath>;
 };
-
-interface PeerDepsArray {
-  deps: (Locator | undefined | null)[];
-  _peerDepenenencies: Map<IdentHash, Descriptor>;
-  depsCount: number;
-}
 
 interface Dependency {
   locator: Locator;
@@ -530,7 +509,8 @@ class FuseInstaller implements Installer {
     if (isVirtual) {
       realPath = VirtualFS.resolveVirtual(realPath);
     }
-    const archivePathExists = xfs.existsSync(realPath); //todo replace with checking disabled packages
+    // const archivePathExists = this.opts.project.disabledLocators.has(pkg.locatorHash)
+    const archivePathExists = xfs.existsSync(realPath);
 
     const orig: Locator = isVirtual
       ? structUtils.devirtualizeLocator(pkg)
@@ -546,6 +526,8 @@ class FuseInstaller implements Installer {
     });
 
     this.allDependencies.set(pkg.locatorHash, dependencyData);
+
+    let recordIndex = this.records.length;
 
     api.holdFetchResult(
       this.asyncActions.set(pkg.locatorHash, async () => {
@@ -564,11 +546,11 @@ class FuseInstaller implements Installer {
         const packageLocation = packagePaths.packageLocation;
 
         if (buildRequest) {
-          this.records.push({
+          this.records[recordIndex] = {
             locator: pkg,
             buildLocations: [packageLocation],
             buildRequest,
-          });
+          }
         }
 
         this.customData.locatorByPath.set(
@@ -851,11 +833,12 @@ class FuseInstaller implements Installer {
       linkType: 'HARD',
     };
     // console.time('hoisted')
+
+    await this.asyncActions.wait();
+    
     this.hoistDependencies({
       levels: this.opts.project.configuration.get(`hoistLevels`),
     });
-
-    await this.asyncActions.wait();
 
     // console.log('count', [...hoisted.keys()].length)
     // console.log('count', [...hoisted.keys()].length)
@@ -873,7 +856,7 @@ class FuseInstaller implements Installer {
     const fuseIsSupported = await this.fuseIsSupported;
     let unmountPromise: Promise<void> | null = null;
     if (fuseIsSupported && xfs.existsSync(mountRoot)) {
-      unmountPromise = this.mounter.unmount(mountRoot); //todo run it sooner
+      unmountPromise = this.mounter.unmount(mountRoot);
     }
 
     for (const [locatorHash, dependencyData] of this.allDependencies) {
@@ -884,7 +867,7 @@ class FuseInstaller implements Installer {
       );
 
       if (packagePathes.unplugged) {
-        if (packagePathes.dependenciesLocation) {
+        if (packagePathes.dependenciesLocation && !this.opts.project.disabledLocators.has(locatorHash)) {
           // link:./bla protocol does not have dependenciesLocation
           this.asyncActions.set(locatorHash + '__deps', async () => {
             await this.persistSymlinks(
@@ -965,6 +948,7 @@ class FuseInstaller implements Installer {
       }
       promises.push(this.mounter.mount(mountRoot, fuseStatePath, upperDir));
     }
+
     await Promise.all([this.asyncActions.wait(), ...promises]);
 
     const storeLocation = getStoreLocation(this.opts.project, {
@@ -1001,9 +985,6 @@ class FuseInstaller implements Installer {
       );
     }
 
-    // Wait for the package installs to catch up
-    await this.asyncActions.wait();
-
     await removeIfEmpty(storeLocation);
     if (this.opts.project.configuration.get(`nodeLinker`) !== `node-modules`)
       await removeIfEmpty(getNodeModulesLocation(this.opts.project));
@@ -1014,7 +995,7 @@ class FuseInstaller implements Installer {
 
     return {
       customData: this.customData,
-      records: this.records,
+      records: this.records.filter(Boolean),
     };
   }
 }
