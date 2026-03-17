@@ -35,6 +35,7 @@ import { jsInstallUtils } from '@yarnpkg/plugin-pnp';
 import { UsageError } from 'clipanion';
 import { FuseNode } from './types';
 import * as fs from 'fs/promises';
+import * as fsSync from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { getMounter, Mounter } from './mount';
@@ -45,6 +46,62 @@ import {
   BuildConfigCache,
   ExtractBuildScriptDataRequirements,
 } from './buildConfigCache';
+
+// process.env.FUSE_PERF = 'true';
+/**
+ * Simple performance timer for debugging. Only active when FUSE_PERF=true.
+ * Sums timings by name and prints a sorted report.
+ */
+// class FusePerf {
+//   private readonly enabled = process.env.FUSE_PERF === 'true';
+//   private readonly timings = new Map<string, number>();
+//   private readonly counts = new Map<string, number>();
+//   private readonly starts = new Map<string, number>();
+
+//   start(name: string): () => void {
+//     if (!this.enabled) return () => {};
+//     const t = performance.now();
+//     this.starts.set(name, t);
+//     return () => {
+//       const start = this.starts.get(name);
+//       this.starts.delete(name);
+//       const elapsed = start !== undefined ? performance.now() - start : 0;
+//       this.timings.set(name, (this.timings.get(name) ?? 0) + elapsed);
+//       this.counts.set(name, (this.counts.get(name) ?? 0) + 1);
+//     };
+//   }
+
+//   async time<T>(name: string, fn: () => Promise<T>): Promise<T> {
+//     const end = this.start(name);
+//     try {
+//       return await fn();
+//     } finally {
+//       end();
+//     }
+//   }
+
+//   timeSync<T>(name: string, fn: () => T): T {
+//     const end = this.start(name);
+//     try {
+//       return fn();
+//     } finally {
+//       end();
+//     }
+//   }
+
+//   print(): void {
+//     if (!this.enabled || this.timings.size === 0) return;
+//     const entries = [...this.timings.entries()].sort((a, b) => b[1] - a[1]);
+//     const total = entries.reduce((s, [, ms]) => s + ms, 0);
+//     console.log('[FUSE_PERF] Timings (ms):');
+//     for (const [name, ms] of entries) {
+//       const count = this.counts.get(name);
+//       const suffix = count !== undefined && count > 1 ? ` (×${count})` : '';
+//       console.log(`  ${name}: ${ms.toFixed(2)}${suffix}`);
+//     }
+//     console.log(`  TOTAL: ${total.toFixed(2)}`);
+//   }
+// }
 
 function assign(node: FuseNode, data: FuseNode) {
   Object.assign(node, data);
@@ -101,18 +158,19 @@ async function calculateDirHash(dirPath: string): Promise<string> {
   return crypto.createHash('sha256').update(combinedData).digest('hex');
 }
 
-async function isPackageDirValid(pkgDir: string): Promise<boolean> {
-  const hashFilePath = path.join(pkgDir, MAGIC_HASH_FILE);
-  try {
-    await fs.access(pkgDir);
-  } catch {
+async function isPackageDirValid(
+  pkgDir: string,
+  isFreshInstall: boolean,
+): Promise<boolean> {
+  if (isFreshInstall) {
     return false;
   }
+  const hashFilePath = path.join(pkgDir, MAGIC_HASH_FILE);
 
   let expectedHash: string;
   try {
     expectedHash = await fs.readFile(hashFilePath, 'utf8');
-  } catch {
+  } catch (err) {
     return false;
   }
 
@@ -427,10 +485,12 @@ const getPathNode = (start: FuseNode, path: PortablePath) => {
 };
 
 class FuseInstaller implements Installer {
+  // private readonly perf = new FusePerf();
   private readonly asyncActions = new miscUtils.AsyncActions(5);
   private readonly globalUnpackOnce = new PromiseOnce();
   private readonly buildConfigCache = new BuildConfigCache();
   private fuseIsSupported: Promise<boolean>;
+  private isFreshInstall: boolean;
   private mounter: Mounter;
   private reflinks: Reflinks;
   constructor(private opts: LinkOptions) {
@@ -447,6 +507,9 @@ class FuseInstaller implements Installer {
         })
       : Promise.resolve(false);
     const localStoreDir = getStoreLocation(opts.project, { unplugged: true });
+    this.isFreshInstall = !fsSync.existsSync(
+      getNodeModulesLocation(opts.project),
+    );
     this.reflinks = new Reflinks(
       opts.project.configuration,
       opts.report,
@@ -528,7 +591,8 @@ class FuseInstaller implements Installer {
 
     let buildConfig: ExtractBuildScriptDataRequirements | null = null;
 
-    if (!isCI) { // because on ci we don't have any cache and don't do incremental installs
+    if (!isCI) {
+      // because on ci we don't have any cache and don't do incremental installs
       buildConfig = await this.buildConfigCache.getCachedBuildConfig(realPath);
       if (!buildConfig) {
         // let packageFs = fetchResult.packageFs
@@ -807,6 +871,7 @@ class FuseInstaller implements Installer {
     if (dependencyData.target) {
       const dirIsValid = await isPackageDirValid(
         dependencyData.packageLocation,
+        this.isFreshInstall,
       );
 
       if (!dirIsValid) {
@@ -824,7 +889,10 @@ class FuseInstaller implements Installer {
             pkgKey,
           ) as PortablePath;
           await this.globalUnpackOnce.call(pkgKey, async () => {
-            const globalDirIsValid = await isPackageDirValid(globalPkgPath);
+            const globalDirIsValid = await isPackageDirValid(
+              globalPkgPath,
+              this.isFreshInstall,
+            );
             if (!globalDirIsValid) {
               await xfs.removePromise(globalPkgPath, { recursive: true }); //race condition, dont really care, it's corrupted package
               await this.atomicUnpack(
@@ -857,9 +925,9 @@ class FuseInstaller implements Installer {
     // Retrieve what's currently inside the package's true nm folder. We
     // will use that to figure out what are the extraneous entries we'll
     // need to remove.
-    const initialEntries = await getNodeModulesListing(
-      dependencyData.dependenciesLocation,
-    );
+    const initialEntries = this.isFreshInstall
+      ? new Map()
+      : await getNodeModulesListing(dependencyData.dependenciesLocation!);
     const extraneous = new Map(initialEntries);
 
     const concurrentPromises: Array<Promise<void>> = [];
@@ -900,9 +968,11 @@ class FuseInstaller implements Installer {
         })(),
       );
     }
-    concurrentPromises.push(
-      cleanNodeModules(dependencyData.dependenciesLocation, extraneous),
-    );
+    if (!this.isFreshInstall) {
+      concurrentPromises.push(
+        cleanNodeModules(dependencyData.dependenciesLocation!, extraneous),
+      );
+    }
     await Promise.all(concurrentPromises);
   }
 
@@ -915,8 +985,8 @@ class FuseInstaller implements Installer {
       linkType: 'HARD',
     };
     // console.time('hoisted')
-    this.hoistDependencies(remapping, {
-      levels: this.opts.project.configuration.get(`hoistLevels`),
+      this.hoistDependencies(remapping, {
+        levels: this.opts.project.configuration.get(`hoistLevels`),
     });
 
     // console.log('count', [...hoisted.keys()].length)
@@ -927,7 +997,6 @@ class FuseInstaller implements Installer {
       baseFs: new ZipOpenFS({
         maxOpenFiles: 80,
         readOnlyArchives: true,
-        customZipImplementation: JsZipImpl,
       }),
     });
     // const toPersist: DependencyData[] = [];
@@ -939,75 +1008,75 @@ class FuseInstaller implements Installer {
       unmountPromise = this.mounter.unmount(mountRoot); //todo run it sooner
     }
 
-    for (const [locatorHash, dependencyData] of this.allDependencies) {
-      const remapped = remapping.get(locatorHash);
-      this.customData.packagePathByLocator.set(
-        locatorHash,
-        remapped?.packageLocation ?? dependencyData.packageLocation,
-      );
-      if (remapped) {
-        // it's was deduped. We don't need to persist it
-        continue;
-      }
+      for (const [locatorHash, dependencyData] of this.allDependencies) {
+        const remapped = remapping.get(locatorHash);
+        this.customData.packagePathByLocator.set(
+          locatorHash,
+          remapped?.packageLocation ?? dependencyData.packageLocation,
+        );
+        if (remapped) {
+          // it's was deduped. We don't need to persist it
+          continue;
+        }
       let relative = ppath.relative(mountRoot, dependencyData.packageLocation);
 
-      if (relative.startsWith(`..`)) {
-        // this is all packages which are outside mountroot. Which is
-        //  hacky but works
-        this.asyncActions.set(locatorHash, async () => {
+        if (relative.startsWith(`..`)) {
+          // this is all packages which are outside mountroot. Which is
+          //  hacky but works
+          this.asyncActions.set(locatorHash, async () => {
           await this.persistHardDependency(
             defaultFsLayer,
             dependencyData,
             remapping,
           );
-        });
-        continue;
-      }
+          });
+          continue;
+        }
 
-      // this are mocked packages. They don't have zip file. But maybe I should write it to disk to be consistent with unplugged behaviour.
-      // const shouldMock = !!opts.mockedPackages?.has(locator.locatorHash) && (!this.check || !cacheFileExists);
-      // shouldMock ? makeMockPackage(): Zipfs...
-      if (this.opts.project.disabledLocators.has(locatorHash)) {
-        continue;
-      }
+        // this are mocked packages. They don't have zip file. But maybe I should write it to disk to be consistent with unplugged behaviour.
+        // const shouldMock = !!opts.mockedPackages?.has(locator.locatorHash) && (!this.check || !cacheFileExists);
+        // shouldMock ? makeMockPackage(): Zipfs...
+        if (this.opts.project.disabledLocators.has(locatorHash)) {
+          continue;
+        }
 
-      if (!dependencyData.target) {
-        throw new Error(
-          `Assertion failed: Expected the package to have target (${JSON.stringify(dependencyData)})`,
-        );
-      }
-
-      const node = getPathNode(fuseData, relative);
-
-      assign(node, {
-        children: {},
-        linkType: 'HARD',
-        target: dependencyData.target,
-      });
-
-      if (dependencyData.dependenciesLocation) {
-        const relative = ppath.relative(
-          mountRoot,
-          dependencyData.dependenciesLocation,
-        );
-        if (relative.startsWith(`..`)) {
+        if (!dependencyData.target) {
           throw new Error(
-            `Assertion failed: Expected the package to have been registered (${JSON.stringify(dependencyData)})`,
+            `Assertion failed: Expected the package to have target (${JSON.stringify(dependencyData)})`,
           );
         }
 
-        const nodeModulesNode = getPathNode(fuseData, relative);
-        for (const dep of dependencyData.iterateAllDependencies(remapping)) {
-          const link = this.getDependencyLink(dependencyData, dep);
-          const node = getPathNode(nodeModulesNode, link.name);
-          assign(node, {
-            children: {},
-            linkType: 'SOFT',
-            target: link.relative,
-          });
+        const node = getPathNode(fuseData, relative);
+
+        assign(node, {
+          children: {},
+          linkType: 'HARD',
+          target: dependencyData.target,
+        });
+
+        if (dependencyData.dependenciesLocation) {
+          const relative = ppath.relative(
+            mountRoot,
+            dependencyData.dependenciesLocation,
+          );
+          if (relative.startsWith(`..`)) {
+            throw new Error(
+              `Assertion failed: Expected the package to have been registered (${JSON.stringify(dependencyData)})`,
+            );
+          }
+
+          const nodeModulesNode = getPathNode(fuseData, relative);
+          for (const dep of dependencyData.iterateAllDependencies(remapping)) {
+            const link = this.getDependencyLink(dependencyData, dep);
+            const node = getPathNode(nodeModulesNode, link.name);
+            assign(node, {
+              children: {},
+              linkType: 'SOFT',
+              target: link.relative,
+            });
+          }
         }
       }
-    }
 
     const records: FinalizeInstallStatus[] = [];
     for (const [locatorHash, dependencyData] of this.allDependencies) {
@@ -1048,28 +1117,28 @@ class FuseInstaller implements Installer {
     if (this.opts.project.configuration.get(`nodeLinker`) !== `fuse`) {
       await xfs.removePromise(storeLocation);
     } else {
-      let extraneous: Set<Filename>;
-      try {
-        extraneous = new Set(await xfs.readdirPromise(storeLocation));
-      } catch {
-        extraneous = new Set();
-      }
+        let extraneous: Set<Filename>;
+        try {
+          extraneous = new Set(await xfs.readdirPromise(storeLocation));
+        } catch {
+          extraneous = new Set();
+        }
 
-      for (const { dependenciesLocation } of this.allDependencies.values()) {
-        if (!dependenciesLocation) continue;
+        for (const { dependenciesLocation } of this.allDependencies.values()) {
+          if (!dependenciesLocation) continue;
 
-        const subpath = ppath.contains(storeLocation, dependenciesLocation);
-        if (subpath === null) continue;
+          const subpath = ppath.contains(storeLocation, dependenciesLocation);
+          if (subpath === null) continue;
 
-        const [storeEntry] = subpath.split(ppath.sep);
-        extraneous.delete(storeEntry as Filename);
-      }
+          const [storeEntry] = subpath.split(ppath.sep);
+          extraneous.delete(storeEntry as Filename);
+        }
 
-      await Promise.all(
-        [...extraneous].map(async (extraneousEntry) => {
-          await xfs.removePromise(ppath.join(storeLocation, extraneousEntry));
-        }),
-      );
+        await Promise.all(
+          [...extraneous].map(async (extraneousEntry) => {
+            await xfs.removePromise(ppath.join(storeLocation, extraneousEntry));
+          }),
+        );
     }
 
     // Wait for the package installs to catch up

@@ -87,11 +87,13 @@ export class Reflinks {
   }
 
   private async init(): Promise<true | string> {
-    if (process.platform !== 'darwin')
-      return `unsupported platform: ${process.platform}`;
     if (isCI)
       return `CI environment`;
 
+    
+    if (process.platform !== 'darwin')
+      return `unsupported platform: ${process.platform}`;
+    
     try {
       await fs.promises.mkdir(Reflinks.GLOBAL_STORE, { recursive: true });
       await fs.promises.mkdir(this.localStoreDir, { recursive: true });
