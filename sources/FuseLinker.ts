@@ -985,8 +985,8 @@ class FuseInstaller implements Installer {
       linkType: 'HARD',
     };
     // console.time('hoisted')
-      this.hoistDependencies(remapping, {
-        levels: this.opts.project.configuration.get(`hoistLevels`),
+    this.hoistDependencies(remapping, {
+      levels: this.opts.project.configuration.get(`hoistLevels`),
     });
 
     // console.log('count', [...hoisted.keys()].length)
@@ -1008,75 +1008,75 @@ class FuseInstaller implements Installer {
       unmountPromise = this.mounter.unmount(mountRoot); //todo run it sooner
     }
 
-      for (const [locatorHash, dependencyData] of this.allDependencies) {
-        const remapped = remapping.get(locatorHash);
-        this.customData.packagePathByLocator.set(
-          locatorHash,
-          remapped?.packageLocation ?? dependencyData.packageLocation,
-        );
-        if (remapped) {
-          // it's was deduped. We don't need to persist it
-          continue;
-        }
+    for (const [locatorHash, dependencyData] of this.allDependencies) {
+      const remapped = remapping.get(locatorHash);
+      this.customData.packagePathByLocator.set(
+        locatorHash,
+        remapped?.packageLocation ?? dependencyData.packageLocation,
+      );
+      if (remapped) {
+        // it's was deduped. We don't need to persist it
+        continue;
+      }
       let relative = ppath.relative(mountRoot, dependencyData.packageLocation);
 
-        if (relative.startsWith(`..`)) {
-          // this is all packages which are outside mountroot. Which is
-          //  hacky but works
-          this.asyncActions.set(locatorHash, async () => {
+      if (relative.startsWith(`..`)) {
+        // this is all packages which are outside mountroot. Which is
+        //  hacky but works
+        this.asyncActions.set(locatorHash, async () => {
           await this.persistHardDependency(
             defaultFsLayer,
             dependencyData,
             remapping,
           );
-          });
-          continue;
-        }
-
-        // this are mocked packages. They don't have zip file. But maybe I should write it to disk to be consistent with unplugged behaviour.
-        // const shouldMock = !!opts.mockedPackages?.has(locator.locatorHash) && (!this.check || !cacheFileExists);
-        // shouldMock ? makeMockPackage(): Zipfs...
-        if (this.opts.project.disabledLocators.has(locatorHash)) {
-          continue;
-        }
-
-        if (!dependencyData.target) {
-          throw new Error(
-            `Assertion failed: Expected the package to have target (${JSON.stringify(dependencyData)})`,
-          );
-        }
-
-        const node = getPathNode(fuseData, relative);
-
-        assign(node, {
-          children: {},
-          linkType: 'HARD',
-          target: dependencyData.target,
         });
+        continue;
+      }
 
-        if (dependencyData.dependenciesLocation) {
-          const relative = ppath.relative(
-            mountRoot,
-            dependencyData.dependenciesLocation,
+      // this are mocked packages. They don't have zip file. But maybe I should write it to disk to be consistent with unplugged behaviour.
+      // const shouldMock = !!opts.mockedPackages?.has(locator.locatorHash) && (!this.check || !cacheFileExists);
+      // shouldMock ? makeMockPackage(): Zipfs...
+      if (this.opts.project.disabledLocators.has(locatorHash)) {
+        continue;
+      }
+
+      if (!dependencyData.target) {
+        throw new Error(
+          `Assertion failed: Expected the package to have target (${JSON.stringify(dependencyData)})`,
+        );
+      }
+
+      const node = getPathNode(fuseData, relative);
+
+      assign(node, {
+        children: {},
+        linkType: 'HARD',
+        target: dependencyData.target,
+      });
+
+      if (dependencyData.dependenciesLocation) {
+        const relative = ppath.relative(
+          mountRoot,
+          dependencyData.dependenciesLocation,
+        );
+        if (relative.startsWith(`..`)) {
+          throw new Error(
+            `Assertion failed: Expected the package to have been registered (${JSON.stringify(dependencyData)})`,
           );
-          if (relative.startsWith(`..`)) {
-            throw new Error(
-              `Assertion failed: Expected the package to have been registered (${JSON.stringify(dependencyData)})`,
-            );
-          }
+        }
 
-          const nodeModulesNode = getPathNode(fuseData, relative);
-          for (const dep of dependencyData.iterateAllDependencies(remapping)) {
-            const link = this.getDependencyLink(dependencyData, dep);
-            const node = getPathNode(nodeModulesNode, link.name);
-            assign(node, {
-              children: {},
-              linkType: 'SOFT',
-              target: link.relative,
-            });
-          }
+        const nodeModulesNode = getPathNode(fuseData, relative);
+        for (const dep of dependencyData.iterateAllDependencies(remapping)) {
+          const link = this.getDependencyLink(dependencyData, dep);
+          const node = getPathNode(nodeModulesNode, link.name);
+          assign(node, {
+            children: {},
+            linkType: 'SOFT',
+            target: link.relative,
+          });
         }
       }
+    }
 
     const records: FinalizeInstallStatus[] = [];
     for (const [locatorHash, dependencyData] of this.allDependencies) {
@@ -1117,28 +1117,28 @@ class FuseInstaller implements Installer {
     if (this.opts.project.configuration.get(`nodeLinker`) !== `fuse`) {
       await xfs.removePromise(storeLocation);
     } else {
-        let extraneous: Set<Filename>;
-        try {
-          extraneous = new Set(await xfs.readdirPromise(storeLocation));
-        } catch {
-          extraneous = new Set();
-        }
+      let extraneous: Set<Filename>;
+      try {
+        extraneous = new Set(await xfs.readdirPromise(storeLocation));
+      } catch {
+        extraneous = new Set();
+      }
 
-        for (const { dependenciesLocation } of this.allDependencies.values()) {
-          if (!dependenciesLocation) continue;
+      for (const { dependenciesLocation } of this.allDependencies.values()) {
+        if (!dependenciesLocation) continue;
 
-          const subpath = ppath.contains(storeLocation, dependenciesLocation);
-          if (subpath === null) continue;
+        const subpath = ppath.contains(storeLocation, dependenciesLocation);
+        if (subpath === null) continue;
 
-          const [storeEntry] = subpath.split(ppath.sep);
-          extraneous.delete(storeEntry as Filename);
-        }
+        const [storeEntry] = subpath.split(ppath.sep);
+        extraneous.delete(storeEntry as Filename);
+      }
 
-        await Promise.all(
-          [...extraneous].map(async (extraneousEntry) => {
-            await xfs.removePromise(ppath.join(storeLocation, extraneousEntry));
-          }),
-        );
+      await Promise.all(
+        [...extraneous].map(async (extraneousEntry) => {
+          await xfs.removePromise(ppath.join(storeLocation, extraneousEntry));
+        }),
+      );
     }
 
     // Wait for the package installs to catch up
