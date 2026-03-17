@@ -214,17 +214,9 @@ class DependencyData {
     return this._packagePathes;
   }
 
-  *iterateAllDependencies(remapping: Remapping): IterableIterator<Dependency> {
+  *iterateAllDependencies(): IterableIterator<Dependency> {
     for (const [_, dep] of this._notPeerDepenendencies) {
-      const remappedDependency = remapping.get(dep.locator.locatorHash);
-      if (remappedDependency) {
-        yield {
-          descriptor: dep.descriptor,
-          locator: remappedDependency.locator,
-        };
-      } else {
-        yield dep;
-      }
+      yield dep;
     }
 
     if (this._peerDeps) {
@@ -245,8 +237,6 @@ class DependencyData {
 
 type AllDependencies = Map<LocatorHash, DependencyData>;
 
-type Remapping = Map<LocatorHash, DependencyData>;
-
 export type FuseCustomData = {
   locatorByPath: Map<PortablePath, string>;
   packagePathByLocator: Map<LocatorHash, PortablePath>;
@@ -256,32 +246,6 @@ interface PeerDepsArray {
   deps: (Locator | undefined | null)[];
   _peerDepenenencies: Map<IdentHash, Descriptor>;
   depsCount: number;
-}
-
-function checkDepsOverlap(a: PeerDepsArray, of: PeerDepsArray) {
-  let isSuperset = false;
-  const isSubset = a.deps.every((dep, ind) => {
-    if (dep == null) {
-      return true;
-    }
-    if (of.deps[ind] == null) {
-      isSuperset = true;
-      return true;
-    }
-    return of.deps[ind]!.locatorHash === dep.locatorHash;
-  });
-  if (isSubset) {
-    if (isSuperset) {
-      return 'superset';
-    } else {
-      return 'subset';
-    }
-  }
-  return 'none';
-}
-interface PeersCombined {
-  array: DependencyData[];
-  procesed: boolean;
 }
 
 interface Dependency {
@@ -308,80 +272,6 @@ function walkTree<T extends string>(
       }
       toVisit.push([child, depth + 1]);
     }
-  }
-}
-
-class PeersDedup {
-  private remapping: Remapping = new Map();
-  // this used to recursively process children and then parents, because child dep can be dedupped and change parent dedupe
-  private peerDepsToProceedMap = new Map<LocatorHash, PeersCombined>();
-  constructor(private virtualMapForDedupe: Map<LocatorHash, PeersCombined>) {}
-  dedupeAndHoistDependencyArrays(deps: PeersCombined) {
-    if (deps.procesed) {
-      return;
-    }
-    deps.procesed = true;
-
-    // deps.array.sort((a, b) => b._peerDeps!.depsCount - a._peerDeps!.depsCount);
-    const deduped: DependencyData[] = [];
-
-    outer: for (let dep of deps.array) {
-      dep._peerDeps!.deps.forEach((d, ind) => {
-        if (d == null) {
-          return;
-        }
-        const peerToProceed = this.peerDepsToProceedMap.get(d.locatorHash);
-        if (peerToProceed) {
-          this.peerDepsToProceedMap.delete(d.locatorHash);
-          this.dedupeAndHoistDependencyArrays(peerToProceed);
-        }
-        const remapped = this.remapping.get(d.locatorHash);
-        if (remapped) {
-          dep._peerDeps!.deps[ind] = remapped.locator;
-        }
-      });
-      for (const duppedDep of deduped) {
-        const overlap = checkDepsOverlap(dep._peerDeps!, duppedDep._peerDeps!);
-        if (overlap !== 'none') {
-          this.remapping.set(dep.locator.locatorHash, duppedDep);
-          if (overlap === 'superset') {
-            dep._peerDeps!.deps.forEach((d, ind) => {
-              if (duppedDep._peerDeps!.deps[ind] == null && d != null) {
-                duppedDep._peerDeps!.deps[ind] = d;
-              }
-            });
-          }
-          continue outer;
-        }
-      }
-      deduped.push(dep);
-    }
-    if (process.env.DEBUG_PEERS) {
-      console.log(
-        deduped.map((d) => ({
-          locator: structUtils.stringifyLocator(d.locator),
-          deps: d._peerDeps!.deps.map(
-            (d) => d && structUtils.stringifyLocator(d),
-          ),
-        })),
-      );
-      console.log(`was: ${deps.array.length} now: ${deduped.length}`);
-    }
-  }
-
-  dedupePeerDeps() {
-    for (const deps of this.virtualMapForDedupe.values()) {
-      for (const dep of deps.array) {
-        if (this.peerDepsToProceedMap.has(dep.locator.locatorHash)) {
-          throw new Error('Unexpected duplicate in virtualMapForDedupe');
-        }
-        this.peerDepsToProceedMap.set(dep.locator.locatorHash, deps);
-      }
-    }
-    for (const deps of this.virtualMapForDedupe.values()) {
-      this.dedupeAndHoistDependencyArrays(deps);
-    }
-    return this.remapping;
   }
 }
 
@@ -668,16 +558,6 @@ class FuseInstaller implements Installer {
 
     this.allDependencies.set(pkg.locatorHash, dependencyData);
 
-    let mbShouldUnpack = true
-
-    if (isVirtual) {
-      if (this.virtualMapForDedupe.has(orig.locatorHash)) {
-        //we unpack only one virtual package because we don't have all info to dedupe
-        mbShouldUnpack = false
-      }
-      this.virtualMapForDedupe.set(orig.locatorHash, { array: [], procesed: false})
-    }
-
     api.holdFetchResult(
       this.asyncActions.set(pkg.locatorHash, async () => {
         const packagePaths = getPackagePaths(pkg, {
@@ -687,12 +567,13 @@ class FuseInstaller implements Installer {
         });
         const packageLocation = packagePaths.packageLocation;
 
-        this.customData.locatorByPath.set( // im not sure if works with virtual
+        this.customData.locatorByPath.set(
+          // im not sure if works with virtual
           packageLocation,
           structUtils.stringifyLocator(pkg),
         );
 
-        if (mbShouldUnpack && packagePaths.unplugged && dependencyData.target) {
+        if (packagePaths.unplugged && dependencyData.target) {
           await this.unpackHardDependency(
             fetchResult,
             dependencyData,
@@ -705,28 +586,12 @@ class FuseInstaller implements Installer {
     );
 
 
-    // api.holdFetchResult(this.asyncActions.set(pkg.locatorHash, async () => {
-    //   await xfs.mkdirPromise(packageLocation, {recursive: true});
-
-    //   // Copy the package source into the <root>/n_m/.store/<hash> directory, so
-    //   // that we can then create symbolic links to it later.
-    //   await xfs.copyPromise(packageLocation, fetchResult.prefixPath, {
-    //     baseFs: fetchResult.packageFs,
-    //     overwrite: false,
-    //     linkStrategy: {
-    //       type: `HardlinkFromIndex`,
-    //       indexPath: await this.indexFolderPromise,
-    //       autoRepair: true,
-    //     },
-    //   });
-    // }));
-
     return {
       packageLocation: 'not-used' as PortablePath,
       buildRequest: null,
     };
   }
-  private hoistDependencies(remapping: Remapping, hoistConfig: HoistConfig) {
+  private hoistDependencies(hoistConfig: HoistConfig) {
     if (!hoistConfig.levels) {
       return;
     }
@@ -751,7 +616,7 @@ class FuseInstaller implements Installer {
         if (depth === hoistConfig.levels! - 1) {
           return;
         }
-        return [...data.iterateAllDependencies(remapping)].map(
+        return [...data.iterateAllDependencies()].map(
           (d) => d.locator.locatorHash,
         );
       },
@@ -775,8 +640,6 @@ class FuseInstaller implements Installer {
       `Hoisted ${hoistedCount} dependencies`,
     );
   }
-
-  virtualMapForDedupe = new Map<LocatorHash, PeersCombined>();
 
   private getDependencyLink(
     packagePathes: PackagePathes,
@@ -838,40 +701,6 @@ class FuseInstaller implements Installer {
 
     const hasExplicitSelfDependency = realDepsMap.has(locator.identHash);
 
-    if (structUtils.isVirtualLocator(locator)) {
-      const pkg = this.opts.project.storedPackages.get(locator.locatorHash);
-      if (!pkg) {
-        throw new Error(
-          `Assertion failed: Expected the package to have been registered (${structUtils.stringifyLocator(locator)})`,
-        );
-      }
-      const orig = structUtils.devirtualizeLocator(locator);
-
-      let depsCount = 0;
-
-      const deps: PeerDepsArray['deps'] = [];
-      for (const identHash of pkg.peerDependencies.keys()) {
-        //assumption is that peerDependencies has same sorting for all virtual deps
-        const realDep = realDepsMap.get(identHash);
-        deps.push(realDep?.locator);
-        if (realDep) {
-          realDepsMap.delete(identHash);
-          depsCount += 1;
-        }
-      }
-      dependencyData._peerDeps = {
-        deps,
-        depsCount,
-        _peerDepenenencies: pkg.peerDependencies,
-      };
-      if (!this.virtualMapForDedupe.has(orig.locatorHash)) {
-        throw new Error('Should not happen, virtual map should be set in installPackageHard')
-      }
-      this.virtualMapForDedupe
-        .get(orig.locatorHash)!
-        .array.push(dependencyData);
-    }
-
     if (
       !hasExplicitSelfDependency &&
       !this.opts.project.tryWorkspaceByLocator(locator)
@@ -912,7 +741,6 @@ class FuseInstaller implements Installer {
     dependencyData: DependencyData,
     packagePaths: PackagePathes,
   ) {
-  
     const dirIsValid = await isPackageDirValid(
       packagePaths.packageLocation,
       this.isFreshInstall,
@@ -952,12 +780,8 @@ class FuseInstaller implements Installer {
 
   private async persistSymlinks(
     dependencyData: DependencyData,
-    packagePaths: PackagePathes,
-    remapping: Remapping,
+    packagePaths: PackagePathes & { dependenciesLocation: PortablePath },
   ) {
-    if (!packagePaths.dependenciesLocation) {
-      return;
-    }
     await xfs.mkdirPromise(packagePaths.dependenciesLocation, {
       recursive: true,
     });
@@ -972,7 +796,7 @@ class FuseInstaller implements Installer {
 
     const concurrentPromises: Array<Promise<void>> = [];
 
-    for (const dep of dependencyData.iterateAllDependencies(remapping)) {
+    for (const dep of dependencyData.iterateAllDependencies()) {
       const { name, relative, absolute } = this.getDependencyLink(
         packagePaths,
         dep,
@@ -1018,14 +842,13 @@ class FuseInstaller implements Installer {
 
   async finalizeInstall() {
     // console.time('peers dedupe')
-    const remapping = new PeersDedup(this.virtualMapForDedupe).dedupePeerDeps();
     // console.timeEnd('peers dedupe')
     const fuseData: FuseNode = {
       children: {},
       linkType: 'HARD',
     };
     // console.time('hoisted')
-    this.hoistDependencies(remapping, {
+    this.hoistDependencies({
       levels: this.opts.project.configuration.get(`hoistLevels`),
     });
 
@@ -1053,17 +876,12 @@ class FuseInstaller implements Installer {
     const records: FinalizeInstallStatus[] = [];
 
     for (const [locatorHash, dependencyData] of this.allDependencies) {
-      const remapped = remapping.get(locatorHash);
-      const packagePathes =
-        remapped?.packagePathes ?? dependencyData.packagePathes;
+      const packagePathes = dependencyData.packagePathes;
       this.customData.packagePathByLocator.set(
         locatorHash,
         packagePathes.packageLocation,
       );
-      if (remapped) { //todo
-        // it's was deduped. We don't need to persist it
-        continue;
-      }
+
       const buildRequest = await dependencyData.buildRequestPromise;
       if (buildRequest) {
         records.push({
@@ -1074,9 +892,16 @@ class FuseInstaller implements Installer {
       }
 
       if (packagePathes.unplugged) {
-        await this.asyncActions.set(locatorHash + '__deps', async () => {
-          await this.persistSymlinks(dependencyData, packagePathes, remapping);
-        });
+        if (packagePathes.dependenciesLocation) { // link:./bla protocol does not have dependenciesLocation
+          this.asyncActions.set(locatorHash + '__deps', async () => {
+            await this.persistSymlinks(
+              dependencyData,
+              packagePathes as PackagePathes & {
+                dependenciesLocation: PortablePath;
+              },
+            );
+          });
+        }
         continue;
       }
       let relative = ppath.relative(mountRoot, packagePathes.packageLocation);
@@ -1118,7 +943,7 @@ class FuseInstaller implements Installer {
         }
 
         const nodeModulesNode = getPathNode(fuseData, relative);
-        for (const dep of dependencyData.iterateAllDependencies(remapping)) {
+        for (const dep of dependencyData.iterateAllDependencies()) {
           const link = this.getDependencyLink(packagePathes, dep);
           const node = getPathNode(nodeModulesNode, link.name);
           assign(node, {

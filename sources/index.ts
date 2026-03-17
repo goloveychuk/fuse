@@ -1,10 +1,11 @@
-import {Plugin, SettingsType} from '@yarnpkg/core';
-import {PortablePath}         from '@yarnpkg/fslib';
+import { Hooks, Plugin, SettingsType } from '@yarnpkg/core';
+import { PortablePath } from '@yarnpkg/fslib';
 
-import {FuseLinker}           from './FuseLinker';
-import CleanStoreCommand      from './commands/cleanStore';
+import { FuseLinker } from './FuseLinker';
+import CleanStoreCommand from './commands/cleanStore';
+import { dedupeAndHoist } from './dedupeUtils';
 
-export {FuseLinker};
+export { FuseLinker };
 
 declare module '@yarnpkg/core' {
   interface ConfigurationValueMap {
@@ -14,10 +15,18 @@ declare module '@yarnpkg/core' {
   }
 }
 
-const plugin: Plugin = {
-  commands: [
-    CleanStoreCommand,
-  ],
+const plugin: Plugin<Hooks> = {
+  commands: [CleanStoreCommand],
+  hooks: {
+    validateProject: (project) => {
+      const origResolveEverything = project.resolveEverything.bind(project);
+      project.resolveEverything = async (...data) => {
+        const result = await origResolveEverything(...data);
+        dedupeAndHoist(project);
+        return result as any;
+      };
+    },
+  },
   configuration: {
     fuseStoreFolder: {
       description: `By default, the store is stored in the 'node_modules/.store' of the project. Sometimes in CI scenario's it is convenient to store this in a different location so it can be cached and reused.`,
@@ -35,9 +44,7 @@ const plugin: Plugin = {
       default: 0,
     },
   },
-  linkers: [
-    FuseLinker,
-  ],
+  linkers: [FuseLinker],
 };
 
 // eslint-disable-next-line arca/no-default-export
