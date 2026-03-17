@@ -188,7 +188,6 @@ class DependencyData {
   public target: PortablePath | null;
   public isWorkspace: boolean;
   public locator: Locator;
-  public buildRequestPromise: Promise<BuildRequest | null> | null;
   public _notPeerDepenendencies = new Map<IdentHash, Dependency>();
   private _packagePathes?: PackagePathes;
   public _peerDeps?: PeerDepsArray;
@@ -196,12 +195,10 @@ class DependencyData {
     isWorkspace: boolean;
     target: PortablePath | null;
     locator: Locator;
-    buildRequestPromise: Promise<BuildRequest | null> | null;
   }) {
     this.target = data.target;
     this.isWorkspace = data.isWorkspace;
     this.locator = data.locator;
-    this.buildRequestPromise = data.buildRequestPromise;
   }
 
   set packagePathes(packagePathes: PackagePathes) {
@@ -381,11 +378,13 @@ const getPathNode = (start: FuseNode, path: PortablePath) => {
 
 class FuseInstaller implements Installer {
   // private readonly perf = new FusePerf();
-  private readonly asyncActions = new miscUtils.AsyncActions(5);
+  private readonly asyncActions = new miscUtils.AsyncActions(isCI ? 20 : 5);
   private readonly globalUnpackOnce = new PromiseOnce();
   private readonly buildConfigCache = new BuildConfigCache();
   private fuseIsSupported: Promise<boolean>;
   private isFreshInstall: boolean;
+  private readonly records: FinalizeInstallStatus[] = [];
+
   private mounter: Mounter;
   private reflinks: Reflinks;
   constructor(private opts: LinkOptions) {
@@ -459,7 +458,6 @@ class FuseInstaller implements Installer {
       isWorkspace,
       target: null,
       locator: pkg,
-      buildRequestPromise: null,
     });
 
     dependencyData.packagePathes = {
@@ -538,14 +536,6 @@ class FuseInstaller implements Installer {
       ? structUtils.devirtualizeLocator(pkg)
       : pkg;
 
-    const buildRequestPromise = this.getBuildConfig(
-      pkg,
-      fetchResult,
-      realPath,
-      orig,
-      archivePathExists,
-    );
-
     const dependencyData = new DependencyData({
       // ...packagePaths,
       isWorkspace: false,
@@ -553,19 +543,33 @@ class FuseInstaller implements Installer {
       target: archivePathExists
         ? ppath.join(realPath, fetchResult.prefixPath)
         : null, // for conditional dependencies
-      buildRequestPromise,
     });
 
     this.allDependencies.set(pkg.locatorHash, dependencyData);
 
     api.holdFetchResult(
       this.asyncActions.set(pkg.locatorHash, async () => {
+        const buildRequest = await this.getBuildConfig(
+          pkg,
+          fetchResult,
+          realPath,
+          orig,
+          archivePathExists,
+        );
         const packagePaths = getPackagePaths(pkg, {
           project: this.opts.project,
-          buildRequest: await buildRequestPromise,
+          buildRequest,
           fuseIsSupported: await this.fuseIsSupported,
         });
         const packageLocation = packagePaths.packageLocation;
+
+        if (buildRequest) {
+          this.records.push({
+            locator: pkg,
+            buildLocations: [packageLocation],
+            buildRequest,
+          });
+        }
 
         this.customData.locatorByPath.set(
           // im not sure if works with virtual
@@ -584,7 +588,6 @@ class FuseInstaller implements Installer {
         dependencyData.packagePathes = packagePaths;
       }),
     );
-
 
     return {
       packageLocation: 'not-used' as PortablePath,
@@ -873,8 +876,6 @@ class FuseInstaller implements Installer {
       unmountPromise = this.mounter.unmount(mountRoot); //todo run it sooner
     }
 
-    const records: FinalizeInstallStatus[] = [];
-
     for (const [locatorHash, dependencyData] of this.allDependencies) {
       const packagePathes = dependencyData.packagePathes;
       this.customData.packagePathByLocator.set(
@@ -882,17 +883,9 @@ class FuseInstaller implements Installer {
         packagePathes.packageLocation,
       );
 
-      const buildRequest = await dependencyData.buildRequestPromise;
-      if (buildRequest) {
-        records.push({
-          locator: dependencyData.locator,
-          buildLocations: [packagePathes.packageLocation],
-          buildRequest,
-        });
-      }
-
       if (packagePathes.unplugged) {
-        if (packagePathes.dependenciesLocation) { // link:./bla protocol does not have dependenciesLocation
+        if (packagePathes.dependenciesLocation) {
+          // link:./bla protocol does not have dependenciesLocation
           this.asyncActions.set(locatorHash + '__deps', async () => {
             await this.persistSymlinks(
               dependencyData,
@@ -1021,7 +1014,7 @@ class FuseInstaller implements Installer {
 
     return {
       customData: this.customData,
-      records,
+      records: this.records,
     };
   }
 }
