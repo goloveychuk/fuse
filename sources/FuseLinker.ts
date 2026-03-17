@@ -185,28 +185,33 @@ async function isPackageDirValid(
 }
 
 class DependencyData {
-  public dependenciesLocation: PortablePath | null;
-  public packageLocation: PortablePath;
   public target: PortablePath | null;
   public isWorkspace: boolean;
   public locator: Locator;
-  public buildRequest: BuildRequest | null;
+  public buildRequestPromise: Promise<BuildRequest | null> | null;
   public _notPeerDepenendencies = new Map<IdentHash, Dependency>();
+  private _packagePathes?: PackagePathes;
   public _peerDeps?: PeerDepsArray;
   constructor(data: {
     isWorkspace: boolean;
     target: PortablePath | null;
-    packageLocation: PortablePath;
     locator: Locator;
-    dependenciesLocation: PortablePath | null;
-    buildRequest?: BuildRequest | null;
+    buildRequestPromise: Promise<BuildRequest | null> | null;
   }) {
-    this.dependenciesLocation = data.dependenciesLocation;
-    this.packageLocation = data.packageLocation;
     this.target = data.target;
     this.isWorkspace = data.isWorkspace;
     this.locator = data.locator;
-    this.buildRequest = data.buildRequest ?? null;
+    this.buildRequestPromise = data.buildRequestPromise;
+  }
+
+  set packagePathes(packagePathes: PackagePathes) {
+    this._packagePathes = packagePathes;
+  }
+  get packagePathes(): PackagePathes {
+    if (!this._packagePathes) {
+      throw new Error('Package pathes are not set, bug');
+    }
+    return this._packagePathes;
   }
 
   *iterateAllDependencies(remapping: Remapping): IterableIterator<Dependency> {
@@ -317,7 +322,7 @@ class PeersDedup {
     }
     deps.procesed = true;
 
-    deps.array.sort((a, b) => b._peerDeps!.depsCount - a._peerDeps!.depsCount);
+    // deps.array.sort((a, b) => b._peerDeps!.depsCount - a._peerDeps!.depsCount);
     const deduped: DependencyData[] = [];
 
     outer: for (let dep of deps.array) {
@@ -560,35 +565,33 @@ class FuseInstaller implements Installer {
       ? ppath.join(packageLocation, Filename.nodeModules)
       : null;
 
-    this.allDependencies.set(
-      pkg.locatorHash,
-      new DependencyData({
-        packageLocation,
-        dependenciesLocation,
-        isWorkspace,
-        target: null,
-        locator: pkg,
-      }),
-    );
+    const dependencyData = new DependencyData({
+      isWorkspace,
+      target: null,
+      locator: pkg,
+      buildRequestPromise: null,
+    });
+
+    dependencyData.packagePathes = {
+      packageLocation,
+      dependenciesLocation,
+      unplugged: true,
+    };
+
+    this.allDependencies.set(pkg.locatorHash, dependencyData);
 
     return {
       packageLocation,
       buildRequest: null,
     };
   }
-
-  private async installPackageHard(
+  private async getBuildConfig(
     pkg: Package,
     fetchResult: FetchResult,
-    api: InstallPackageExtraApi,
+    realPath: PortablePath,
+    devirtualizedLocator: Locator,
+    archivePathExists: boolean,
   ) {
-    const isVirtual = structUtils.isVirtualLocator(pkg);
-    let realPath = fetchResult.packageFs.getRealPath();
-    if (isVirtual) {
-      realPath = VirtualFS.resolveVirtual(realPath);
-    }
-    const archivePathExists = xfs.existsSync(realPath);
-
     let buildConfig: ExtractBuildScriptDataRequirements | null = null;
 
     if (!isCI) {
@@ -616,44 +619,91 @@ class FuseInstaller implements Installer {
       buildConfig = await extractBuildScriptData(fetchResult);
     }
 
-    const devirtualizedLocator: Locator = isVirtual
-      ? structUtils.devirtualizeLocator(pkg)
-      : pkg;
     const dependencyMeta = this.opts.project.getDependencyMeta(
       devirtualizedLocator,
       pkg.version,
     );
-    const buildRequest = jsInstallUtils.extractBuildRequest(
+
+    return jsInstallUtils.extractBuildRequest(
       pkg,
       buildConfig,
       dependencyMeta,
       { configuration: this.opts.project.configuration },
     );
+  }
 
-    const packagePaths = getPackagePaths(pkg, {
-      project: this.opts.project,
-      buildRequest,
-      fuseIsSupported: await this.fuseIsSupported,
-    });
-    const packageLocation = packagePaths.packageLocation;
+  private async installPackageHard(
+    pkg: Package,
+    fetchResult: FetchResult,
+    api: InstallPackageExtraApi,
+  ) {
+    const isVirtual = structUtils.isVirtualLocator(pkg);
+    let realPath = fetchResult.packageFs.getRealPath();
+    if (isVirtual) {
+      realPath = VirtualFS.resolveVirtual(realPath);
+    }
+    const archivePathExists = xfs.existsSync(realPath); //todo replace with checking disabled packages
 
-    this.customData.locatorByPath.set(
-      packageLocation,
-      structUtils.stringifyLocator(pkg),
+    const orig: Locator = isVirtual
+      ? structUtils.devirtualizeLocator(pkg)
+      : pkg;
+
+    const buildRequestPromise = this.getBuildConfig(
+      pkg,
+      fetchResult,
+      realPath,
+      orig,
+      archivePathExists,
     );
 
-    this.allDependencies.set(
-      pkg.locatorHash,
-      new DependencyData({
-        ...packagePaths,
-        isWorkspace: false,
-        locator: pkg,
-        target: archivePathExists
-          ? ppath.join(realPath, fetchResult.prefixPath)
-          : null, // for conditional dependencies
-        buildRequest,
+    const dependencyData = new DependencyData({
+      // ...packagePaths,
+      isWorkspace: false,
+      locator: pkg,
+      target: archivePathExists
+        ? ppath.join(realPath, fetchResult.prefixPath)
+        : null, // for conditional dependencies
+      buildRequestPromise,
+    });
+
+    this.allDependencies.set(pkg.locatorHash, dependencyData);
+
+    let mbShouldUnpack = true
+
+    if (isVirtual) {
+      if (this.virtualMapForDedupe.has(orig.locatorHash)) {
+        //we unpack only one virtual package because we don't have all info to dedupe
+        mbShouldUnpack = false
+      }
+      this.virtualMapForDedupe.set(orig.locatorHash, { array: [], procesed: false})
+    }
+
+    api.holdFetchResult(
+      this.asyncActions.set(pkg.locatorHash, async () => {
+        const packagePaths = getPackagePaths(pkg, {
+          project: this.opts.project,
+          buildRequest: await buildRequestPromise,
+          fuseIsSupported: await this.fuseIsSupported,
+        });
+        const packageLocation = packagePaths.packageLocation;
+
+        this.customData.locatorByPath.set( // im not sure if works with virtual
+          packageLocation,
+          structUtils.stringifyLocator(pkg),
+        );
+
+        if (mbShouldUnpack && packagePaths.unplugged && dependencyData.target) {
+          await this.unpackHardDependency(
+            fetchResult,
+            dependencyData,
+            packagePaths,
+          );
+        }
+
+        dependencyData.packagePathes = packagePaths;
       }),
     );
+
 
     // api.holdFetchResult(this.asyncActions.set(pkg.locatorHash, async () => {
     //   await xfs.mkdirPromise(packageLocation, {recursive: true});
@@ -672,7 +722,7 @@ class FuseInstaller implements Installer {
     // }));
 
     return {
-      packageLocation,
+      packageLocation: 'not-used' as PortablePath,
       buildRequest: null,
     };
   }
@@ -729,7 +779,7 @@ class FuseInstaller implements Installer {
   virtualMapForDedupe = new Map<LocatorHash, PeersCombined>();
 
   private getDependencyLink(
-    dependencyData: DependencyData,
+    packagePathes: PackagePathes,
     { locator: dependency, descriptor }: Dependency,
   ) {
     // Downgrade virtual workspaces (cf isPnpmVirtualCompatible's documentation)
@@ -749,17 +799,17 @@ class FuseInstaller implements Installer {
       );
 
     const name = structUtils.stringifyIdent(descriptor) as PortablePath;
-    const depDstPath = ppath.join(dependencyData.dependenciesLocation!, name);
+    const depDstPath = ppath.join(packagePathes.dependenciesLocation!, name);
 
     const depLinkPath = ppath.relative(
       ppath.dirname(depDstPath),
-      depSrcPaths.packageLocation,
+      depSrcPaths.packagePathes.packageLocation,
     );
 
     return {
       name,
       relative: depLinkPath,
-      absolute: depSrcPaths.packageLocation,
+      absolute: depSrcPaths.packagePathes.packageLocation,
     };
   }
 
@@ -778,10 +828,6 @@ class FuseInstaller implements Installer {
       throw new Error(
         `Assertion failed: Expected the package to have been registered (${structUtils.stringifyLocator(locator)})`,
       );
-
-    const { dependenciesLocation } = dependencyData;
-
-    if (!dependenciesLocation) return;
 
     const realDepsMap = new Map(
       dependencies.map(([desc, loc]) => [
@@ -819,10 +865,7 @@ class FuseInstaller implements Installer {
         _peerDepenenencies: pkg.peerDependencies,
       };
       if (!this.virtualMapForDedupe.has(orig.locatorHash)) {
-        this.virtualMapForDedupe.set(orig.locatorHash, {
-          array: [],
-          procesed: false,
-        });
+        throw new Error('Should not happen, virtual map should be set in installPackageHard')
       }
       this.virtualMapForDedupe
         .get(orig.locatorHash)!
@@ -851,74 +894,71 @@ class FuseInstaller implements Installer {
   }
 
   private async atomicUnpack(
-    defaultFsLayer: VirtualFS,
-    target: PortablePath,
+    fetchResult: FetchResult,
     destPkgPath: PortablePath,
   ): Promise<void> {
     await withAtomic(destPkgPath, async (tmpDir) => {
       const tmp = tmpDir as PortablePath;
-      await xfs.copyPromise(tmp, target, { baseFs: defaultFsLayer });
+      await xfs.copyPromise(tmp, fetchResult.prefixPath, {
+        baseFs: fetchResult.packageFs,
+      });
       const hash = await calculateDirHash(tmp);
       await xfs.changeFilePromise(ppath.join(tmp, MAGIC_HASH_FILE), hash);
     });
   }
 
-  private async persistHardDependency(
-    defaultFsLayer: VirtualFS,
+  private async unpackHardDependency(
+    fetchResult: FetchResult,
     dependencyData: DependencyData,
-    remapping: Remapping,
+    packagePaths: PackagePathes,
   ) {
-    if (dependencyData.target) {
-      const dirIsValid = await isPackageDirValid(
-        dependencyData.packageLocation,
-        this.isFreshInstall,
-      );
-
-      if (!dirIsValid) {
-        await xfs.removePromise(dependencyData.packageLocation, {
-          recursive: true,
-        });
-        if (await this.reflinks.isSupported()) {
-          const devirtualized = structUtils.isVirtualLocator(
-            dependencyData.locator,
-          )
-            ? structUtils.devirtualizeLocator(dependencyData.locator)
-            : dependencyData.locator;
-          const pkgKey = structUtils.slugifyLocator(devirtualized);
-          const globalPkgPath = this.reflinks.getGlobalPackagePath(
-            pkgKey,
-          ) as PortablePath;
-          await this.globalUnpackOnce.call(pkgKey, async () => {
-            const globalDirIsValid = await isPackageDirValid(
-              globalPkgPath,
-              this.isFreshInstall,
-            );
-            if (!globalDirIsValid) {
-              await xfs.removePromise(globalPkgPath, { recursive: true }); //race condition, dont really care, it's corrupted package
-              await this.atomicUnpack(
-                defaultFsLayer,
-                dependencyData.target as PortablePath,
-                globalPkgPath,
-              );
-            }
-          });
-          await this.reflinks.cloneToLocal(
-            globalPkgPath,
-            dependencyData.packageLocation,
-          );
-        } else {
-          await this.atomicUnpack(
-            defaultFsLayer,
-            dependencyData.target,
-            dependencyData.packageLocation,
-          );
-        }
-      }
-    }
-    if (!dependencyData.dependenciesLocation) {
+  
+    const dirIsValid = await isPackageDirValid(
+      packagePaths.packageLocation,
+      this.isFreshInstall,
+    );
+    if (dirIsValid) {
       return;
     }
-    await xfs.mkdirPromise(dependencyData.dependenciesLocation, {
+    await xfs.removePromise(packagePaths.packageLocation, {
+      recursive: true,
+    });
+    if (await this.reflinks.isSupported()) {
+      const devirtualized = structUtils.isVirtualLocator(dependencyData.locator)
+        ? structUtils.devirtualizeLocator(dependencyData.locator)
+        : dependencyData.locator;
+      const pkgKey = structUtils.slugifyLocator(devirtualized);
+      const globalPkgPath = this.reflinks.getGlobalPackagePath(
+        pkgKey,
+      ) as PortablePath;
+      await this.globalUnpackOnce.call(pkgKey, async () => {
+        const globalDirIsValid = await isPackageDirValid(
+          globalPkgPath,
+          this.isFreshInstall,
+        );
+        if (!globalDirIsValid) {
+          await xfs.removePromise(globalPkgPath, { recursive: true }); //race condition, dont really care, it's corrupted package
+          await this.atomicUnpack(fetchResult, globalPkgPath);
+        }
+      });
+      await this.reflinks.cloneToLocal(
+        globalPkgPath,
+        packagePaths.packageLocation,
+      );
+    } else {
+      await this.atomicUnpack(fetchResult, packagePaths.packageLocation);
+    }
+  }
+
+  private async persistSymlinks(
+    dependencyData: DependencyData,
+    packagePaths: PackagePathes,
+    remapping: Remapping,
+  ) {
+    if (!packagePaths.dependenciesLocation) {
+      return;
+    }
+    await xfs.mkdirPromise(packagePaths.dependenciesLocation, {
       recursive: true,
     });
 
@@ -927,17 +967,17 @@ class FuseInstaller implements Installer {
     // need to remove.
     const initialEntries = this.isFreshInstall
       ? new Map()
-      : await getNodeModulesListing(dependencyData.dependenciesLocation!);
+      : await getNodeModulesListing(packagePaths.dependenciesLocation);
     const extraneous = new Map(initialEntries);
 
     const concurrentPromises: Array<Promise<void>> = [];
 
     for (const dep of dependencyData.iterateAllDependencies(remapping)) {
       const { name, relative, absolute } = this.getDependencyLink(
-        dependencyData,
+        packagePaths,
         dep,
       );
-      const depDstPath = ppath.join(dependencyData.dependenciesLocation, name);
+      const depDstPath = ppath.join(packagePaths.dependenciesLocation, name);
 
       const existing = extraneous.get(name);
       extraneous.delete(name);
@@ -970,7 +1010,7 @@ class FuseInstaller implements Installer {
     }
     if (!this.isFreshInstall) {
       concurrentPromises.push(
-        cleanNodeModules(dependencyData.dependenciesLocation!, extraneous),
+        cleanNodeModules(packagePaths.dependenciesLocation!, extraneous),
       );
     }
     await Promise.all(concurrentPromises);
@@ -989,16 +1029,18 @@ class FuseInstaller implements Installer {
       levels: this.opts.project.configuration.get(`hoistLevels`),
     });
 
+    await this.asyncActions.wait();
+
     // console.log('count', [...hoisted.keys()].length)
     // console.log('count', [...hoisted.keys()].length)
     // console.log('hoisted', [...hoisted.keys()])
 
-    const defaultFsLayer = new VirtualFS({
-      baseFs: new ZipOpenFS({
-        maxOpenFiles: 80,
-        readOnlyArchives: true,
-      }),
-    });
+    // const defaultFsLayer = new VirtualFS({
+    //   baseFs: new ZipOpenFS({
+    //     maxOpenFiles: 80,
+    //     readOnlyArchives: true,
+    //   }),
+    // });
     // const toPersist: DependencyData[] = [];
 
     const mountRoot = getStoreLocation(this.opts.project, { unplugged: false });
@@ -1008,29 +1050,39 @@ class FuseInstaller implements Installer {
       unmountPromise = this.mounter.unmount(mountRoot); //todo run it sooner
     }
 
+    const records: FinalizeInstallStatus[] = [];
+
     for (const [locatorHash, dependencyData] of this.allDependencies) {
       const remapped = remapping.get(locatorHash);
+      const packagePathes =
+        remapped?.packagePathes ?? dependencyData.packagePathes;
       this.customData.packagePathByLocator.set(
         locatorHash,
-        remapped?.packageLocation ?? dependencyData.packageLocation,
+        packagePathes.packageLocation,
       );
-      if (remapped) {
+      if (remapped) { //todo
         // it's was deduped. We don't need to persist it
         continue;
       }
-      let relative = ppath.relative(mountRoot, dependencyData.packageLocation);
+      const buildRequest = await dependencyData.buildRequestPromise;
+      if (buildRequest) {
+        records.push({
+          locator: dependencyData.locator,
+          buildLocations: [packagePathes.packageLocation],
+          buildRequest,
+        });
+      }
 
-      if (relative.startsWith(`..`)) {
-        // this is all packages which are outside mountroot. Which is
-        //  hacky but works
-        this.asyncActions.set(locatorHash, async () => {
-          await this.persistHardDependency(
-            defaultFsLayer,
-            dependencyData,
-            remapping,
-          );
+      if (packagePathes.unplugged) {
+        await this.asyncActions.set(locatorHash + '__deps', async () => {
+          await this.persistSymlinks(dependencyData, packagePathes, remapping);
         });
         continue;
+      }
+      let relative = ppath.relative(mountRoot, packagePathes.packageLocation);
+
+      if (relative.startsWith(`..`)) {
+        throw new Error(`Should not be here: ${relative}`);
       }
 
       // this are mocked packages. They don't have zip file. But maybe I should write it to disk to be consistent with unplugged behaviour.
@@ -1054,10 +1106,10 @@ class FuseInstaller implements Installer {
         target: dependencyData.target,
       });
 
-      if (dependencyData.dependenciesLocation) {
+      if (packagePathes.dependenciesLocation) {
         const relative = ppath.relative(
           mountRoot,
-          dependencyData.dependenciesLocation,
+          packagePathes.dependenciesLocation,
         );
         if (relative.startsWith(`..`)) {
           throw new Error(
@@ -1067,7 +1119,7 @@ class FuseInstaller implements Installer {
 
         const nodeModulesNode = getPathNode(fuseData, relative);
         for (const dep of dependencyData.iterateAllDependencies(remapping)) {
-          const link = this.getDependencyLink(dependencyData, dep);
+          const link = this.getDependencyLink(packagePathes, dep);
           const node = getPathNode(nodeModulesNode, link.name);
           assign(node, {
             children: {},
@@ -1076,19 +1128,6 @@ class FuseInstaller implements Installer {
           });
         }
       }
-    }
-
-    const records: FinalizeInstallStatus[] = [];
-    for (const [locatorHash, dependencyData] of this.allDependencies) {
-      if (dependencyData.isWorkspace) continue;
-      const buildRequest = dependencyData.buildRequest;
-      if (!buildRequest) continue;
-      if (remapping.has(locatorHash)) continue;
-      records.push({
-        locator: dependencyData.locator,
-        buildLocations: [dependencyData.packageLocation],
-        buildRequest,
-      });
     }
 
     let promises: Promise<unknown>[] = [];
@@ -1124,10 +1163,13 @@ class FuseInstaller implements Installer {
         extraneous = new Set();
       }
 
-      for (const { dependenciesLocation } of this.allDependencies.values()) {
-        if (!dependenciesLocation) continue;
+      for (const { packagePathes } of this.allDependencies.values()) {
+        if (!packagePathes.dependenciesLocation) continue; //todo
 
-        const subpath = ppath.contains(storeLocation, dependenciesLocation);
+        const subpath = ppath.contains(
+          storeLocation,
+          packagePathes.dependenciesLocation,
+        );
         if (subpath === null) continue;
 
         const [storeEntry] = subpath.split(ppath.sep);
@@ -1174,6 +1216,12 @@ function getStoreLocation(
   return project.configuration.get(`fuseStoreFolder`);
 }
 
+interface PackagePathes {
+  packageLocation: PortablePath;
+  dependenciesLocation: PortablePath | null;
+  unplugged: boolean;
+}
+
 function getPackagePaths(
   locator: Locator,
   {
@@ -1185,11 +1233,12 @@ function getPackagePaths(
     buildRequest: BuildRequest | null;
     fuseIsSupported: boolean;
   },
-) {
+): PackagePathes {
   const pkgKey = structUtils.slugifyLocator(locator);
   const shouldBuild = Boolean(buildRequest && !buildRequest.skipped);
+  const unplugged = shouldBuild || fuseIsSupported === false;
   const storeLocation = getStoreLocation(project, {
-    unplugged: shouldBuild || fuseIsSupported === false,
+    unplugged,
   });
 
   const packageLocation = ppath.join(storeLocation, pkgKey, `package`);
@@ -1199,7 +1248,7 @@ function getPackagePaths(
     Filename.nodeModules,
   );
 
-  return { packageLocation, dependenciesLocation };
+  return { packageLocation, dependenciesLocation, unplugged };
 }
 
 function isPnpmVirtualCompatible(
