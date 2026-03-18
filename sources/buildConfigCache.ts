@@ -1,9 +1,11 @@
 import { Manifest } from '@yarnpkg/core';
+import { PortablePath } from '@yarnpkg/fslib';
 import * as fs from 'fs/promises';
 import * as crypto from 'crypto';
 
+const VERSION = 1
 export type ExtractBuildScriptDataRequirements = {
-  manifest: Pick<Manifest, `scripts`>;
+  manifest: Pick<Manifest, `scripts` | `bin`>;
   misc: {
     hasBindingGyp: boolean;
   };
@@ -11,6 +13,7 @@ export type ExtractBuildScriptDataRequirements = {
 
 interface Json {
     scripts: [string, string][];
+    bin: [string, string][];
     hasBindingGyp: boolean;
 }
 
@@ -21,7 +24,7 @@ export class BuildConfigCache {
 
     try {
       const cachedBuildConfig = await fs.readFile(
-        realPath + '.build-config.json',
+        realPath + `.build-config-${VERSION}.json`,
         'utf8',
       );
       const json = JSON.parse(cachedBuildConfig) as Json;
@@ -32,6 +35,7 @@ export class BuildConfigCache {
         },
         manifest: {
           scripts: new Map(json.scripts),
+          bin: new Map(json.bin ?? []) as Map<string, PortablePath>,
         },
       };
     } catch (err) {
@@ -46,6 +50,7 @@ export class BuildConfigCache {
     let tmpFilePath = realPath + crypto.randomUUID();
     const json: Json = {
       scripts: Array.from(buildConfig.manifest.scripts.entries()),
+      bin: Array.from(buildConfig.manifest.bin.entries()),
       hasBindingGyp: buildConfig.misc.hasBindingGyp,
     };
     await fs.writeFile(tmpFilePath, JSON.stringify(json));

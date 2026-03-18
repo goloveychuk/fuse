@@ -188,6 +188,7 @@ class DependencyData {
   public isWorkspace: boolean;
   public locator: Locator;
   public _notPeerDepenendencies = new Map<IdentHash, Dependency>();
+  public binEntries = new Map<string, string>();
   private _packagePathes?: PackagePathes;
   constructor(data: {
     isWorkspace: boolean;
@@ -213,7 +214,6 @@ class DependencyData {
     for (const [_, dep] of this._notPeerDepenendencies) {
       yield dep;
     }
-
   }
 }
 
@@ -447,6 +447,12 @@ class FuseInstaller implements Installer {
 
     this.allDependencies.set(pkg.locatorHash, dependencyData);
 
+    const manifest =
+      (await Manifest.tryFind(fetchResult.prefixPath, {
+        baseFs: fetchResult.packageFs,
+      })) ?? new Manifest();
+    dependencyData.binEntries = manifest.bin;
+
     return {
       packageLocation,
       buildRequest: null,
@@ -491,12 +497,15 @@ class FuseInstaller implements Installer {
       pkg.version,
     );
 
-    return jsInstallUtils.extractBuildRequest(
-      pkg,
-      buildConfig,
-      dependencyMeta,
-      { configuration: this.opts.project.configuration },
-    );
+    return {
+      buildRequest: jsInstallUtils.extractBuildRequest(
+        pkg,
+        buildConfig,
+        dependencyMeta,
+        { configuration: this.opts.project.configuration },
+      ),
+      manifest: buildConfig.manifest,
+    };
   }
 
   private async installPackageHard(
@@ -531,7 +540,7 @@ class FuseInstaller implements Installer {
 
     api.holdFetchResult(
       this.asyncActions.set(pkg.locatorHash, async () => {
-        const buildRequest = await this.getBuildConfig(
+        const { buildRequest, manifest } = await this.getBuildConfig(
           pkg,
           fetchResult,
           realPath,
@@ -550,7 +559,7 @@ class FuseInstaller implements Installer {
             locator: pkg,
             buildLocations: [packageLocation],
             buildRequest,
-          }
+          };
         }
 
         this.customData.locatorByPath.set(
@@ -568,6 +577,7 @@ class FuseInstaller implements Installer {
         }
 
         dependencyData.packagePathes = packagePaths;
+        dependencyData.binEntries = manifest.bin;
       }),
     );
 
@@ -624,6 +634,77 @@ class FuseInstaller implements Installer {
       MessageName.UNNAMED,
       `Hoisted ${hoistedCount} dependencies`,
     );
+  }
+
+  private async persistBinSymlinks() {
+    for (const dependencyData of this.allDependencies.values()) {
+      if (!dependencyData.isWorkspace) continue;
+
+      const nmLocation = dependencyData.packagePathes.dependenciesLocation;
+      if (!nmLocation) continue;
+
+      const binDir = ppath.join(nmLocation, `.bin` as Filename);
+      const newBins = new Map<Filename, PortablePath>();
+
+      for (const dep of dependencyData.iterateAllDependencies()) {
+        let targetLocator = dep.locator;
+        if (
+          !isPnpmVirtualCompatible(targetLocator, {
+            project: this.opts.project,
+          })
+        ) {
+          targetLocator = structUtils.devirtualizeLocator(targetLocator);
+        }
+
+        const depData = this.allDependencies.get(targetLocator.locatorHash);
+        if (!depData || depData.binEntries.size === 0) continue;
+
+        for (const [binName, binScript] of depData.binEntries) {
+          if (binScript === ``) continue;
+          const target = ppath.join(
+            depData.packagePathes.packageLocation,
+            binScript as PortablePath,
+          );
+          newBins.set(binName as Filename, target);
+        }
+      }
+
+      if (newBins.size === 0) {
+        try {
+          await xfs.removePromise(binDir);
+        } catch {}
+        continue;
+      }
+
+      await xfs.mkdirPromise(binDir, { recursive: true });
+
+      let existing: Filename[] = [];
+      try {
+        existing = await xfs.readdirPromise(binDir);
+      } catch {}
+
+      for (const entry of existing) {
+        if (!newBins.has(entry)) {
+          await xfs.removePromise(ppath.join(binDir, entry));
+        }
+      }
+
+      for (const [binName, target] of newBins) {
+        const symlinkPath = ppath.join(binDir, binName);
+        const relativePath = ppath.relative(binDir, target);
+
+        try {
+          const existingTarget = await xfs.readlinkPromise(symlinkPath);
+          if (existingTarget === relativePath) continue;
+          await xfs.removePromise(symlinkPath);
+        } catch {}
+
+        await xfs.symlinkPromise(relativePath, symlinkPath);
+        try {
+          await xfs.chmodPromise(target, 0o755);
+        } catch {}
+      }
+    }
   }
 
   private getDependencyLink(
@@ -774,7 +855,9 @@ class FuseInstaller implements Installer {
     // Retrieve what's currently inside the package's true nm folder. We
     // will use that to figure out what are the extraneous entries we'll
     // need to remove.
-    const initialEntries = await getNodeModulesListing(packagePaths.dependenciesLocation);
+    const initialEntries = await getNodeModulesListing(
+      packagePaths.dependenciesLocation,
+    );
     const extraneous = new Map(initialEntries);
 
     const concurrentPromises: Array<Promise<void>> = [];
@@ -833,7 +916,9 @@ class FuseInstaller implements Installer {
     // console.time('hoisted')
 
     await this.asyncActions.wait();
-    
+
+    await this.persistBinSymlinks();
+
     this.hoistDependencies({
       levels: this.opts.project.configuration.get(`hoistLevels`),
     });
@@ -865,7 +950,10 @@ class FuseInstaller implements Installer {
       );
 
       if (packagePathes.unplugged) {
-        if (packagePathes.dependenciesLocation && !this.opts.project.disabledLocators.has(locatorHash)) {
+        if (
+          packagePathes.dependenciesLocation &&
+          !this.opts.project.disabledLocators.has(locatorHash)
+        ) {
           // link:./bla protocol does not have dependenciesLocation
           this.asyncActions.set(locatorHash + '__deps', async () => {
             await this.persistSymlinks(
