@@ -395,6 +395,7 @@ class FuseInstaller implements Installer {
     packagePathByLocator: new Map(),
   };
   private allDependencies: AllDependencies = new Map();
+  private virtualWorkspaceContexts = new Map<LocatorHash, Set<string>>();
 
   attachCustomData(customData: any) {
     // We don't want to attach the data because it's only used in the Linker and we'll recompute it anyways in the Installer,
@@ -429,6 +430,13 @@ class FuseInstaller implements Installer {
     );
 
     const isWorkspace = this.opts.project.tryWorkspaceByLocator(pkg) !== null;
+
+    // Virtual workspaces can't have distinct dependency sets on disk —
+    // the non-virtual instance is the canonical one.
+    if (isWorkspace && structUtils.isVirtualLocator(pkg)) {
+      return { packageLocation, buildRequest: null };
+    }
+
     const dependenciesLocation = isWorkspace
       ? ppath.join(packageLocation, Filename.nodeModules)
       : null;
@@ -647,16 +655,7 @@ class FuseInstaller implements Installer {
       const newBins = new Map<Filename, PortablePath>();
 
       for (const dep of dependencyData.iterateAllDependencies()) {
-        let targetLocator = dep.locator;
-        if (
-          !isPnpmVirtualCompatible(targetLocator, {
-            project: this.opts.project,
-          })
-        ) {
-          targetLocator = structUtils.devirtualizeLocator(targetLocator);
-        }
-
-        const depData = this.allDependencies.get(targetLocator.locatorHash);
+        const depData = this.allDependencies.get(dep.locator.locatorHash);
         if (!depData || depData.binEntries.size === 0) continue;
 
         for (const [binName, binScript] of depData.binEntries) {
@@ -711,17 +710,7 @@ class FuseInstaller implements Installer {
     packagePathes: PackagePathes,
     { locator: dependency, descriptor }: Dependency,
   ) {
-    // Downgrade virtual workspaces (cf isPnpmVirtualCompatible's documentation)
-    let targetDependency = dependency;
-    if (!isPnpmVirtualCompatible(dependency, { project: this.opts.project })) {
-      this.opts.report.reportWarningOnce(
-        MessageName.UNNAMED,
-        `The fuse linker doesn't support providing different versions to workspaces' peer dependencies`,
-      );
-      targetDependency = structUtils.devirtualizeLocator(dependency);
-    }
-
-    const depSrcPaths = this.allDependencies.get(targetDependency.locatorHash);
+    const depSrcPaths = this.allDependencies.get(dependency.locatorHash);
     if (typeof depSrcPaths === `undefined`)
       throw new Error(
         `Assertion failed: Expected the package to have been registered (${structUtils.stringifyLocator(dependency)})`,
@@ -748,21 +737,33 @@ class FuseInstaller implements Installer {
   ) {
     if (this.opts.project.configuration.get(`nodeLinker`) !== `fuse`) return;
 
-    // We don't install those packages at all, because they can't be used anyway
-    if (!isPnpmVirtualCompatible(locator, { project: this.opts.project }))
-      return;
-
+    // Virtual workspaces are not registered in allDependencies (skipped in installPackageSoft)
     const dependencyData = this.allDependencies.get(locator.locatorHash);
     if (typeof dependencyData === `undefined`)
-      throw new Error(
-        `Assertion failed: Expected the package to have been registered (${structUtils.stringifyLocator(locator)})`,
-      );
+      return;
 
     const realDepsMap = new Map(
-      dependencies.map(([desc, loc]) => [
-        desc.identHash,
-        { descriptor: desc, locator: loc },
-      ]),
+      dependencies.map(([desc, loc]) => {
+        // Normalize virtual workspace refs to their canonical non-virtual locator,
+        // since virtual workspaces are not registered in allDependencies.
+        if (
+          structUtils.isVirtualLocator(loc) &&
+          this.opts.project.tryWorkspaceByLocator(loc)
+        ) {
+          const devirtualized = structUtils.devirtualizeLocator(loc);
+          let contexts = this.virtualWorkspaceContexts.get(devirtualized.locatorHash);
+          if (!contexts) {
+            contexts = new Set();
+            this.virtualWorkspaceContexts.set(devirtualized.locatorHash, contexts);
+          }
+          contexts.add(structUtils.stringifyLocator(loc));
+          loc = devirtualized;
+        }
+        return [
+          desc.identHash,
+          { descriptor: desc, locator: loc },
+        ] as [IdentHash, Dependency];
+      }),
     );
 
     const hasExplicitSelfDependency = realDepsMap.has(locator.identHash);
@@ -917,11 +918,23 @@ class FuseInstaller implements Installer {
 
     await this.asyncActions.wait();
 
-    await this.persistBinSymlinks();
+    for (const [wsHash, contexts] of this.virtualWorkspaceContexts) {
+      if (contexts.size <= 1) continue;
+      const wsData = this.allDependencies.get(wsHash);
+      if (!wsData) continue;
+      const pretty = structUtils.prettyLocator(this.opts.project.configuration, wsData.locator);
+      this.opts.report.reportWarningOnce(
+        MessageName.UNNAMED,
+        `Workspace ${pretty} has ${contexts.size} different peer dependency resolutions, ` +
+        `but the fuse linker can only provide one on disk — all dependents will share the same resolution`,
+      );
+    }
+
 
     this.hoistDependencies({
       levels: this.opts.project.configuration.get(`hoistLevels`),
     });
+    await this.persistBinSymlinks();
 
     // console.log('count', [...hoisted.keys()].length)
     // console.log('count', [...hoisted.keys()].length)
@@ -1134,28 +1147,6 @@ function getPackagePaths(
   );
 
   return { packageLocation, dependenciesLocation, unplugged };
-}
-
-function isPnpmVirtualCompatible(
-  locator: Locator,
-  { project }: { project: Project },
-) {
-  // The pnpm install strategy has a limitation: because Node would always
-  // resolve symbolic path to their true location, and because we can't just
-  // copy-paste workspaces like we do with normal dependencies, we can't give
-  // multiple dependency sets to the same workspace based on how its peer
-  // dependencies are satisfied by its dependents (like PnP can).
-  //
-  // For this reason, we ignore all virtual instances of workspaces, and
-  // instead have to rely on the user being aware of this caveat.
-  //
-  // TODO: Perhaps we could implement an error message when we detect multiple
-  // sets in a way that can't be reproduced on disk?
-
-  return (
-    !structUtils.isVirtualLocator(locator) ||
-    !project.tryWorkspaceByLocator(locator)
-  );
 }
 
 async function getNodeModulesListing(nmPath: PortablePath) {
